@@ -1,0 +1,62 @@
+\ Model opf_with_dc_load_flow_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+Minimize
+ 
+Subject To
+ power_flow_95_0: - 67.07183509574718 theta_95[1]
+   + 54.94505494505496 theta_95[2] = 0.005625
+ power_flow_95_1: 54.94505494505496 theta_95[1]
+   - 109.8901098901099 theta_95[2] + 54.94505494505496 theta_95[3] = 0
+ power_flow_95_2: 54.94505494505496 theta_95[2]
+   - 172.8574455847183 theta_95[3] + 54.94505494505496 theta_95[4]
+   + 62.96733569460844 theta_95[11] = 0
+ power_flow_95_3: 54.94505494505496 theta_95[3]
+   - 163.86211191406 theta_95[4] + 54.94505494505496 theta_95[5]
+   + 53.97200202395009 theta_95[12] = 0
+ power_flow_95_4: 54.94505494505496 theta_95[4]
+   - 109.8901098901099 theta_95[5] + 54.94505494505496 theta_95[6] = 0
+ power_flow_95_5: 54.94505494505496 theta_95[5]
+   - 172.8574455847183 theta_95[6] + 54.94505494505496 theta_95[7]
+   + 62.96733569460844 theta_95[16] = 0
+ power_flow_95_6: 54.94505494505496 theta_95[6]
+   - 109.8901098901099 theta_95[7] + 54.94505494505496 theta_95[8] = 0
+ power_flow_95_7: 54.94505494505496 theta_95[7]
+   - 109.8901098901099 theta_95[8] + 54.94505494505496 theta_95[9] = 0
+ power_flow_95_8: 54.94505494505496 theta_95[8]
+   - 172.8574455847183 theta_95[9] + 54.94505494505496 theta_95[10]
+   + 62.96733569460844 theta_95[17] = 0
+ power_flow_95_9: 54.94505494505496 theta_95[9]
+   - 117.9123906396634 theta_95[10] + 62.96733569460844 theta_95[18] = 0
+ power_flow_95_10: pv_gen_95[11] + 62.96733569460844 theta_95[3]
+   - 62.96733569460844 theta_95[11] = 0.005625
+ power_flow_95_15: pv_gen_95[16] + 62.96733569460844 theta_95[6]
+   - 62.96733569460844 theta_95[16] = 0.005625
+ power_flow_95_16: pv_gen_95[17] + 62.96733569460844 theta_95[9]
+   - 62.96733569460844 theta_95[17] = 0.005625
+ power_flow_95_17: pv_gen_95[18] + 62.96733569460844 theta_95[10]
+   - 62.96733569460844 theta_95[18] = 0.005625
+ abs_current_mag_ka_pos_3_95: - 7.9306355657915622e+07 theta_95[4]
+   + 7.9306355657915622e+07 theta_95[5] + abs_current_mag_ka_3_95 >= 0
+ line_loading_95_3: 100 abs_current_mag_ka_3_95 <= 1e+06
+Bounds
+ -infinity <= pv_gen_95[11] <= 0
+ -infinity <= pv_gen_95[16] <= 0
+ -infinity <= pv_gen_95[17] <= 0
+ -infinity <= pv_gen_95[18] <= 0
+ theta_95[1] free
+ theta_95[2] free
+ theta_95[3] free
+ theta_95[4] free
+ theta_95[5] free
+ theta_95[6] free
+ theta_95[7] free
+ theta_95[8] free
+ theta_95[9] free
+ theta_95[10] free
+ theta_95[11] free
+ theta_95[12] free
+ theta_95[16] free
+ theta_95[17] free
+ theta_95[18] free
+ abs_current_mag_ka_3_95 free
+End
