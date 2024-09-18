@@ -85,7 +85,7 @@ def plot_opf_results(results):
     ext_grid_import = results['ext_grid_import']
     ext_grid_export = results['ext_grid_export']
     theta = results['theta']
-    line_results = results['line_results']
+    line_results = results['line_results']  # Assuming you have 'line_results' in the results
     
     # Get the list of time steps
     time_steps = list(pv_gen.keys())

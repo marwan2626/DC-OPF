@@ -18,292 +18,23 @@ import numpy as np
 import data as dt
 
 # Function to solve OPF problem over a time series
-# Function to solve OPF problem over a time series
-def solve_opf(net, pv_generators, time_steps, df_pv, const_pv, const_load, Bbus):
-    model = gp.Model("opf_day")
-    power_cost = 100  # €/MW for both external grid power and losses
-
-    # Define Variables for PV generation with bounds based on const_pv
-    sgen_p_mw = model.addVars(
-        time_steps, len(pv_generators),
-        lb=0,  # Lower bound is always 0
-        ub={(t, i): const_pv.data_source.get_time_step_value(t, 'pvgen') for t in time_steps for i in range(len(pv_generators))},
-        name="sgen_p_mw"
-    )
-
-    # Define variable for external grid power (import/export) at each time step
-    ext_grid_p_mw = model.addVars(time_steps, lb=-GRB.INFINITY, name="ext_grid_p_mw")
-
-    # Auxiliary variable for the absolute value of external grid power
-    ext_grid_abs_p_mw = model.addVars(time_steps, lb=0, name="ext_grid_abs_p_mw")
-
-    # Add constraints to enforce that ext_grid_abs_p_mw[t] is the absolute value of ext_grid_p_mw[t]
-    for t in time_steps:
-        model.addConstr(ext_grid_abs_p_mw[t] >= ext_grid_p_mw[t], name=f"abs_ext_grid_pos_{t}")
-        model.addConstr(ext_grid_abs_p_mw[t] >= -ext_grid_p_mw[t], name=f"abs_ext_grid_neg_{t}")
-
-    # Objective: Minimize the total cost for both importing and exporting power
-    total_cost = gp.quicksum(power_cost * ext_grid_abs_p_mw[t] for t in time_steps)
-    model.setObjective(total_cost, GRB.MINIMIZE)
-
-    # Debug information storage
-    debug_info = []
-
-    # Constraints for Power Balance and Line Loading
-    for t in time_steps:
-        # Update PV generation limits
-        for i, pv_gen in enumerate(pv_generators):
-            max_p = df_pv.loc[t, 'pvgen']
-            net.sgen.at[pv_gen, 'max_p_mw'] = max_p
-
-        # Update time-series data
-        const_pv.time_step(net, time=t)
-        const_load.time_step(net, time=t)
-
-        # Power balance constraint
-        total_load_p_mw = net.load['p_mw'].sum()
-        model.addConstr(
-            gp.quicksum(sgen_p_mw[t, i] for i in range(len(pv_generators))) + ext_grid_p_mw[t] == total_load_p_mw,
-            name=f"power_balance_{t}"
-        )
-
-        # Recalculate power injection vector and run DC load flow
-        P = np.zeros(len(net.bus), dtype=np.float64)
-        if not net.load.empty:
-            P[net.load.bus.values.astype(int)] -= net.load.p_mw.values.astype(np.float64)
-        if not net.sgen.empty:
-            P[net.sgen.bus.values.astype(int)] += net.sgen.p_mw.values.astype(np.float64)
-
-        flow_results = dt.run_dc_load_flow(Bbus, net, P)
-        external_grid_power = flow_results['transformer_pl_mw'].iloc[0]
-
-        # Debugging print for power balance and external grid power
-        debug_info.append({
-            'time_step': t,
-            'total_load': total_load_p_mw,
-            'ext_grid_power': external_grid_power,
-            'line_loading': flow_results['line_loading_percent']
-        })
-
-    # Initialize line indices
-    line_indices = None
-
-    for t in time_steps:
-        # Run the DC load flow calculation
-        flow_results = dt.run_dc_load_flow(Bbus, net, P)
-
-        # Ensure line_indices are set correctly based on the first time step
-        if line_indices is None:
-            line_indices = flow_results['line_pl_mw'].index
-
-        # Add line loading constraints for each line based on the correct indices
-        for idx, loading_percent in flow_results['line_loading_percent'].items():
-            if pd.isna(loading_percent) or loading_percent < 0:
-                print(f"Skipping invalid line loading constraint for line {idx}: {loading_percent}")
-            else:
-                # Use the correct line indices for each line loading constraint
-                model.addConstr(loading_percent <= 100, name=f"line_loading_{line_indices[idx]}_{t}")
-
-    # Solve the optimization model
-    model.optimize()
-
-    if model.status == GRB.INFEASIBLE:
-        print("Model is infeasible. Computing IIS...")
-        model.computeIIS()
-        model.write("infeasible_model.ilp")
-        return None
-
-    # Apply optimized values if the solution is optimal
-    if model.status == GRB.OPTIMAL:
-        for t in time_steps:
-            for i, gen in enumerate(pv_generators):
-                net.sgen.at[gen, 'p_mw'] = sgen_p_mw[t, i].X
-            net.ext_grid.at[0, 'p_mw'] = ext_grid_p_mw[t].X
-
-            P = np.zeros(len(net.bus), dtype=np.float64)
-            if not net.load.empty:
-                P[net.load.bus.values.astype(int)] -= net.load.p_mw.values.astype(np.float64)
-            if not net.sgen.empty:
-                P[net.sgen.bus.values.astype(int)] += net.sgen.p_mw.values.astype(np.float64)
-            flow_results = dt.run_dc_load_flow(Bbus, net, P)
-
-    # Print debug info for each time step
-    for info in debug_info:
-        print(f"Time step {info['time_step']}: Total Load = {info['total_load']}, External Grid Power = {info['ext_grid_power']}, Line Loading = {info['line_loading']}")
-
-  # Step 7: Collect and return the results
-    results = {
-        "time_step": [],
-        "line_loading_percent": [],
-        "ext_grid_p_mw": [],
-        "sgen_p_mw": [],
-        "curtailment_pv_mw": [],
-        "load_p_mw": []  # Add load power to results
-    }
-
-    for t in time_steps:
-        # Calculate curtailment: max possible generation - actual generation
-        curtailment_pv = [
-            df_pv.loc[t, 'pvgen'] - sgen_p_mw[t, i].X for i in range(len(pv_generators))
-        ]
-
-        results["time_step"].append(t)
-        results["line_loading_percent"].append(flow_results['line_loading_percent'].tolist())
-        results["ext_grid_p_mw"].append(ext_grid_p_mw[t].X)
-        results["sgen_p_mw"].append([sgen_p_mw[t, i].X for i in range(len(pv_generators))])
-        results["curtailment_pv_mw"].append(curtailment_pv)
-        results["load_p_mw"].append(net.load['p_mw'].tolist())  # Save load power
-
-    # Step 8: Save the results in the same structure as your manual timeseries
-    line_loading_percent_df = pd.DataFrame(results["line_loading_percent"], index=results["time_step"], columns=line_indices)
-    ext_grid_p_mw_df = pd.DataFrame(results["ext_grid_p_mw"], index=results["time_step"], columns=[0])
-    sgen_p_mw_df = pd.DataFrame(results["sgen_p_mw"], index=results["time_step"], columns=net.sgen.index)
-    curtailment_pv_df = pd.DataFrame(results["curtailment_pv_mw"], index=results["time_step"], columns=net.sgen.index)
-    load_p_mw_df = pd.DataFrame(results["load_p_mw"], index=results["time_step"], columns=net.load.index)
-
-    # Combine all into a single DataFrame
-    results_opf_df = pd.concat({
-        "line_loading_percent": line_loading_percent_df,
-        "ext_grid_p_mw": ext_grid_p_mw_df,
-        "sgen_p_mw": sgen_p_mw_df,
-        "curtailment_pv_mw": curtailment_pv_df,
-        "load_p_mw": load_p_mw_df
-    }, axis=1)
-
-    # Save to Excel
-    results_opf_df.to_excel("opf_results.xlsx")
-
-    return results_opf_df
-
-
-def solve_opf_direct_load_flow(net, pv_generators, time_steps, df_pv, const_pv, const_load, Bbus):
-    model = gp.Model("opf_with_loadflow")
-    power_cost = 100  # €/MW for both external grid power and losses
-
-    # Define the optimization variables for PV generation with bounds based on sgen (provided by const_pv)
-    pv_gen = model.addVars(
-        time_steps, len(pv_generators),
-        lb=0,  # Lower bound is 0
-        ub={(t, i): net.sgen.at[pv_gen, 'p_mw'] for t in time_steps for i, pv_gen in enumerate(pv_generators)},  # Upper bound is the sgen value
-        name="pv_gen"
-    )
-
-    # Define the optimization variable for external grid power (import/export) at each time step
-    ext_grid_p_mw = model.addVars(time_steps, lb=-GRB.INFINITY, name="ext_grid_p_mw")
-
-    # Auxiliary variable for the absolute value of external grid power
-    ext_grid_abs_p_mw = model.addVars(time_steps, lb=0, name="ext_grid_abs_p_mw")
-
-    # Absolute value of external grid power constraints
-    for t in time_steps:
-        model.addConstr(ext_grid_abs_p_mw[t] >= ext_grid_p_mw[t], name=f"abs_ext_grid_pos_{t}")
-        model.addConstr(ext_grid_abs_p_mw[t] >= -ext_grid_p_mw[t], name=f"abs_ext_grid_neg_{t}")
-
-    # Objective: Minimize the total cost for both importing and exporting power
-    total_cost = gp.quicksum(power_cost * ext_grid_abs_p_mw[t] for t in time_steps)
-    model.setObjective(total_cost, GRB.MINIMIZE)
-
-    # Constraints for power balance and line loading
-    for t in time_steps:
-        # Update load time series (uncontrollable)
-        const_load.time_step(net, time=t)
-
-        # Power balance constraint at each bus
-        total_load_p_mw = net.load['p_mw'].sum()
-        model.addConstr(
-            gp.quicksum(pv_gen[t, i] for i in range(len(pv_generators))) + ext_grid_p_mw[t] == total_load_p_mw,
-            name=f"power_balance_{t}"
-        )
-
-    # Solve the optimization model
-    model.optimize()
-
-    if model.status == GRB.INFEASIBLE:
-        print("Model is infeasible. Computing IIS...")
-        model.computeIIS()
-        model.write("infeasible_model.ilp")
-        return None
-
-    # Initialize results storage
-    results = {
-        "time_step": [],
-        "line_loading_percent": [],
-        "ext_grid_p_mw": [],
-        "pv_gen": [],
-        "curtailment_pv_mw": [],
-        "load_p_mw": []  # Add load power to results
-    }
-
-    # Initialize line indices
-    line_indices = None
-
-    # After optimization, retrieve the optimized values for `pv_gen` and run the DC load flow calculation
-    for t in time_steps:
-        # Extract optimized `pv_gen` values for the current time step
-        pv_gen_values = np.array([pv_gen[t, i].X for i in range(len(pv_generators))])
-
-        # Construct the power injection vector P after optimization
-        P = np.zeros(len(net.bus), dtype=np.float64)
-        if not net.load.empty:
-            P[net.load.bus.values.astype(int)] -= net.load.p_mw.values.astype(np.float64)
-        if not net.sgen.empty:
-            P[net.sgen.bus.values.astype(int)] += pv_gen_values
-
-        # Perform load flow calculations
-        flow_results = dt.run_dc_load_flow(Bbus, net, P)
-
-        if line_indices is None:
-            line_indices = flow_results['line_pl_mw'].index
-
-        # Calculate curtailment: max possible generation (sgen) - actual generation (pv_gen)
-        curtailment_pv = [net.sgen.at[pv_gen, 'p_mw'] - pv_gen_values[i] for i in range(len(pv_generators))]
-
-        # Store results for the current time step
-        results["time_step"].append(t)
-        results["line_loading_percent"].append(flow_results['line_loading_percent'].tolist())
-        results["ext_grid_p_mw"].append(ext_grid_p_mw[t].X)
-        results["pv_gen"].append(pv_gen_values.tolist())
-        results["curtailment_pv_mw"].append(curtailment_pv)
-        results["load_p_mw"].append(net.load['p_mw'].tolist())
-
-    # Step 8: Save the results in the same structure as your manual timeseries
-    line_loading_percent_df = pd.DataFrame(results["line_loading_percent"], index=results["time_step"], columns=line_indices)
-    ext_grid_p_mw_df = pd.DataFrame(results["ext_grid_p_mw"], index=results["time_step"], columns=[0])
-    pv_gen_df = pd.DataFrame(results["pv_gen"], index=results["time_step"], columns=net.sgen.index)
-    curtailment_pv_df = pd.DataFrame(results["curtailment_pv_mw"], index=results["time_step"], columns=net.sgen.index)
-    load_p_mw_df = pd.DataFrame(results["load_p_mw"], index=results["time_step"], columns=net.load.index)
-
-    # Combine all into a single DataFrame
-    results_opf_df = pd.concat({
-        "line_loading_percent": line_loading_percent_df,
-        "ext_grid_p_mw": ext_grid_p_mw_df,
-        "pv_gen": pv_gen_df,
-        "curtailment_pv_mw": curtailment_pv_df,
-        "load_p_mw": load_p_mw_df
-    }, axis=1)
-
-    # Save to Excel
-    results_opf_df.to_excel("opf_results.xlsx")
-
-    return results_opf_df
-
-
-import gurobipy as gp
-from gurobipy import GRB
-import numpy as np
-
 def solve_opf2(net, time_steps, const_pv, const_load, Bbus):
     model = gp.Model("opf_with_dc_load_flow")
 
     # Define the costs for import and export
-    import_cost = 100  # €/MW for importing power from the external grid
-    export_cost = 100  # €/MW for exporting power to the external grid
+    import_cost = 10  # €/MW for importing power from the external grid
+    export_cost = 8  # €/MW for exporting power to the external grid
+    curtailment_cost = 150  # €/MW for curtailing PV (set higher than import/export costs)
+
+    epsilon = 100e-9  # Small positive value to ensure some external grid usage
+
 
     # Initialize decision variables
     pv_gen_vars = {}  # Store PV generation decision variables
     ext_grid_import_vars = {}  # Store external grid import power decision variables
     ext_grid_export_vars = {}  # Store external grid export power decision variables
     theta_vars = {}  # Store voltage angle decision variables (radians)
+    curtailment_vars = {} # Store decision variables for curtailment
 
     slack_bus_index = net.ext_grid.bus.iloc[0]
 
@@ -330,10 +61,17 @@ def solve_opf2(net, time_steps, const_pv, const_load, Bbus):
 
         # Create PV generation variables for this time step
         pv_gen_vars[t] = model.addVars(pv_buses, lb=0, ub=net.sgen.p_mw.values, name=f'pv_gen_{t}')
-
+        curtailment_vars[t] = model.addVars(pv_buses, lb=0, ub=net.sgen.p_mw.values, name=f'curtailment_{t}')
+        for bus in pv_buses:
+            # Find the index in sgen corresponding to this bus
+            sgen_index = np.where(net.sgen.bus.values == bus)[0][0]
+            model.addConstr(curtailment_vars[t][bus] == net.sgen.p_mw.values[sgen_index] - pv_gen_vars[t][bus], 
+                            name=f'curtailment_constraint_{t}_{bus}')
+            
         # External grid power variables for import and export at the slack bus (bus 0)
         ext_grid_import_vars[t] = model.addVar(lb=0, name=f'ext_grid_import_{t}')  # Import is non-negative
         ext_grid_export_vars[t] = model.addVar(lb=0, name=f'ext_grid_export_{t}')  # Export is non-negative
+        model.addConstr(ext_grid_import_vars[t] + ext_grid_export_vars[t] >= epsilon, name=f'nonzero_ext_grid_usage_{t}')
 
         # Voltage angle variables for all buses
         theta_vars[t] = model.addVars(net.bus.index, lb=-GRB.INFINITY, name=f'theta_{t}')
@@ -364,8 +102,8 @@ def solve_opf2(net, time_steps, const_pv, const_load, Bbus):
 
         model.update()
 
-        for bus in net.bus.index:
-            print(f"Time step {t}, Bus {bus}: Power injected (MW) = {P_injected[bus]}")
+        #for bus in net.bus.index:
+            #print(f"Time step {t}, Bus {bus}: Power injected (MW) = {P_injected[bus]}")
 
         # Convert P_injected to per unit
         P_pu = {bus: P_injected[bus] / net.sn_mva for bus in net.bus.index}
@@ -383,6 +121,13 @@ def solve_opf2(net, time_steps, const_pv, const_load, Bbus):
                 power_balance_expr += Bbus_reduced[i, j] * theta_reduced_vars[j]
 
             model.addConstr(P_pu_reduced[i] == power_balance_expr, name=f'power_flow_{t}_{i}')
+
+        # Total power balance constraint at the slack bus
+        # This enforces that the slack bus always balances generation and demand
+        total_generation = gp.quicksum(pv_gen_vars[t][bus] for bus in pv_buses)
+        total_load = gp.quicksum(net.load.loc[net.load.bus == bus, 'p_mw'].values[0] for bus in net.load.bus.values)
+        model.addConstr(ext_grid_import_vars[t] - ext_grid_export_vars[t] == total_load - total_generation, name=f'power_balance_slack_{t}')
+
 
     # Line power flow and loading constraints (with the corrected expression)
     for t in time_steps:
@@ -417,11 +162,14 @@ def solve_opf2(net, time_steps, const_pv, const_load, Bbus):
 
             # Store results for each line in the time step
             line_results[t]["line_pl_mw"][line.Index] = power_flow_mw
-            line_results[t]["line_loading_percent"][line.Index] = line_loading_percent
+            line_results[t]["line_loading_percent"][line.Index] = line_loading_percent            
             line_results[t]["line_current_mag"][line.Index] = current_mag_ka
 
-    # Objective: Minimize the total cost of power import and export across all time steps
-    total_cost = gp.quicksum(import_cost * ext_grid_import_vars[t] + export_cost * ext_grid_export_vars[t] for t in time_steps)
+    # Objective: Minimize total cost (import, export, and curtailment costs)
+    total_cost = gp.quicksum(import_cost * ext_grid_import_vars[t] + 
+                            export_cost * ext_grid_export_vars[t] + 
+                            curtailment_cost * curtailment_vars[t][bus] 
+                            for t in time_steps for bus in pv_buses)
     model.setObjective(total_cost, GRB.MINIMIZE)
 
     # After adding all constraints and variables
@@ -439,6 +187,23 @@ def solve_opf2(net, time_steps, const_pv, const_load, Bbus):
             ext_grid_import_results[t] = ext_grid_import_vars[t].x
             ext_grid_export_results[t] = ext_grid_export_vars[t].x
             theta_results[t] = {bus: theta_vars[t][bus].x for bus in net.bus.index}
+
+            # Extract numerical values for line results
+            for line in net.line.itertuples():
+                line_results[t]["line_pl_mw"][line.Index] = line_results[t]["line_pl_mw"][line.Index].getValue()
+                line_results[t]["line_loading_percent"][line.Index] = line_results[t]["line_loading_percent"][line.Index].getValue()
+                line_results[t]["line_current_mag"][line.Index] = line_results[t]["line_current_mag"][line.Index].getValue()
+
+            # After optimization, print the key variable results
+            print(f"Time Step {t}:")
+            print(f"PV Generation: {[pv_gen_vars[t][bus].x for bus in pv_buses]}")
+            print(f"External Grid Import: {ext_grid_import_vars[t].x}")
+            print(f"External Grid Export: {ext_grid_export_vars[t].x}")
+            print(f"Theta (angles): {[theta_vars[t][bus].x for bus in net.bus.index]}")
+
+            #for line in net.line.itertuples():
+                #print(f"Line {line.Index}: Power Flow MW = {line_results[t]['line_pl_mw'][line.Index]}, Loading % = {line_results[t]['line_loading_percent'][line.Index]}")
+
 
         # Return results in a structured format
         results = {
