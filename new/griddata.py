@@ -59,9 +59,25 @@ def setup_grid():
     update_bus_references(net.trafo, ['hv_bus', 'lv_bus'])
     update_bus_references(net.switch, ['bus', 'element'])
 
+    # Define the peak power for each bus
+    peak_power_dict = {12: 20, 16: 60, 17: 50, 18: 35, 19: 35}
+
     # Add PV generators to the corresponding buses
     pv_buses = [12, 16, 17, 18, 19]
     pv_generators = []
+
+    # Load and preprocess the PV generation profile CSV file
+    df_pv = pd.read_csv("pv_generation_profile.csv")
+    df_pv['time'] = pd.to_datetime(df_pv['time'], format='%H:%M:%S').dt.time
+    df_pv['time_step'] = range(len(df_pv))  # Create a numerical index
+    df_pv.set_index('time_step', inplace=True)
+
+    # Instead of scaling in ConstControl, we directly scale the profiles in the DataFrame
+    for bus in pv_buses:
+        df_pv[f'pvgen_bus_{bus}'] = df_pv['pvgen'] * peak_power_dict[bus] / 1000  # Scale to peak power
+
+    # Create a single DFData object containing all the bus profiles
+    ds_pv = DFData(df_pv[[f'pvgen_bus_{bus}' for bus in pv_buses]])
 
     # Load and preprocess the load profile CSV file
     df = pd.read_csv("load_profile_1111.csv")
@@ -71,19 +87,12 @@ def setup_grid():
     df['mult'] = df['mult'] * 15 / 1000
     ds = DFData(df)
 
-    # Load and preprocess the PV generation profile CSV file
-    df_pv = pd.read_csv("pv_generation_profile.csv")
-    df_pv['time'] = pd.to_datetime(df_pv['time'], format='%H:%M:%S').dt.time
-    df_pv['time_step'] = range(len(df_pv))  # Create a numerical index
-    df_pv.set_index('time_step', inplace=True)
-    df_pv['pvgen'] = df_pv['pvgen'] * 300 / 1000
-    ds_pv = DFData(df_pv)
-
+    # Add PV generators and set the correct limits
     for bus in pv_buses:
         pv_gen = pp.create_sgen(net, old_to_new_bus_map[bus], p_mw=0, q_mvar=0, type='pv', controllable=True)
         # Set initial limits
         net.sgen.at[pv_gen, 'min_p_mw'] = 0
-        net.sgen.at[pv_gen, 'max_p_mw'] = df_pv['pvgen'].max()  # Set this to the maximum possible value in the profile
+        net.sgen.at[pv_gen, 'max_p_mw'] = df_pv[f'pvgen_bus_{bus}'].max()  # Max value from scaled profile
         net.sgen.at[pv_gen, 'min_q_mvar'] = -0.5 / 1000  # Example value, adjust as needed
         net.sgen.at[pv_gen, 'max_q_mvar'] = 0.5 / 1000  # Example value, adjust as needed
         pv_generators.append(pv_gen)
@@ -93,9 +102,10 @@ def setup_grid():
     const_load = ConstControl(net, element='load', element_index=profile_loads,
                               variable='p_mw', data_source=ds, profile_name=["mult"] * len(profile_loads))
 
-    # Initialize ConstControl for PV and load profiles with correct time steps
+    # Initialize ConstControl for PV and load profiles with correct time steps, using scaled profiles directly
     const_pv = ConstControl(net, element='sgen', element_index=pv_generators,
-                            variable='p_mw', data_source=ds_pv, profile_name=["pvgen"] * len(pv_generators))
+                            variable='p_mw', data_source=ds_pv,
+                            profile_name=[f'pvgen_bus_{bus}' for bus in pv_buses])
 
     # Remove buses with prefixes "I" or "C" along with associated elements
     buses_to_remove = net.bus[net.bus['name'].str.startswith(('Bus I', 'Bus C'))].index
@@ -117,46 +127,3 @@ def setup_grid():
     return net, df_pv, df, pv_generators, const_load, const_pv
 
 
-def setup_grid2():
-    
-    net = pn.panda_four_load_branch()
-
-    # Add PV generators to the corresponding buses
-    pv_buses = [3]
-    pv_generators = []
-
-    # Load and preprocess the load profile CSV file
-    df = pd.read_csv("load_profile_1111.csv")
-    df['time'] = pd.to_datetime(df['time'], format='%H:%M:%S').dt.time
-    df['time_step'] = range(len(df))  # Create a numerical index
-    df.set_index('time_step', inplace=True)
-    df['mult'] = df['mult'] * 15 / 1000
-    ds = DFData(df)
-
-    # Load and preprocess the PV generation profile CSV file
-    df_pv = pd.read_csv("pv_generation_profile.csv")
-    df_pv['time'] = pd.to_datetime(df_pv['time'], format='%H:%M:%S').dt.time
-    df_pv['time_step'] = range(len(df_pv))  # Create a numerical index
-    df_pv.set_index('time_step', inplace=True)
-    df_pv['pvgen'] = df_pv['pvgen'] * 300 / 1000
-    ds_pv = DFData(df_pv)
-
-    for bus in pv_buses:
-        pv_gen = pp.create_sgen(net, bus, p_mw=0, q_mvar=0, type='pv', controllable=True)
-        # Set initial limits
-        net.sgen.at[pv_gen, 'min_p_mw'] = 0
-        net.sgen.at[pv_gen, 'max_p_mw'] = df_pv['pvgen'].max()  # Set this to the maximum possible value in the profile
-        net.sgen.at[pv_gen, 'min_q_mvar'] = -0.5 / 1000  # Example value, adjust as needed
-        net.sgen.at[pv_gen, 'max_q_mvar'] = 0.5 / 1000  # Example value, adjust as needed
-        pv_generators.append(pv_gen)
-
-    # Add the Load profile to the network
-    profile_loads = net.load.index.intersection([0, 1, 2, 3, 4, 5])
-    const_load = ConstControl(net, element='load', element_index=profile_loads,
-                              variable='p_mw', data_source=ds, profile_name=["mult"] * len(profile_loads))
-
-    # Initialize ConstControl for PV and load profiles with correct time steps
-    const_pv = ConstControl(net, element='sgen', element_index=pv_generators,
-                            variable='p_mw', data_source=ds_pv, profile_name=["pvgen"] * len(pv_generators))
-    
-    return net, df_pv, df, pv_generators, const_load, const_pv
