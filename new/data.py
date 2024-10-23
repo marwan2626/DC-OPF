@@ -134,10 +134,10 @@ def manual_dc_timeseries(time_steps, net, const_pv, const_load, Ybus):
             P[net.sgen.bus.values.astype(int)] += net.sgen.p_mw.values.astype(np.float64)
 
         # Print load and generation values at each bus and time step
-        print(f"Time step {t}:")
-        print(f"Loads at each bus: {net.load.p_mw.values.tolist()}")
-        print(f"Generation at each bus: {net.sgen.p_mw.values.tolist()}")
-        print(f"Power Injection Vector (P): {P}")
+        #print(f"Time step {t}:")
+        #print(f"Loads at each bus: {net.load.p_mw.values.tolist()}")
+        #print(f"Generation at each bus: {net.sgen.p_mw.values.tolist()}")
+        #print(f"Power Injection Vector (P): {P}")
 
         # Run the DC load flow calculation
         flow_results = run_dc_load_flow(Ybus, net, P)
