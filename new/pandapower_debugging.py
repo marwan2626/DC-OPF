@@ -21,12 +21,16 @@ import pandapower as pp
 season = 'winter'
 net, const_load_heatpump, const_load_household, time_steps = gd.setup_grid_irep(season)
 
+#net, df_pv, df, pv_generators, const_load, const_pv = gd.setup_grid()
+#time_steps = df_pv.index
+
 # Create the output writer
 def create_output_writer(net, time_steps, output_dir):
     ow = OutputWriter(net, time_steps, output_path=output_dir, output_file_type=".xlsx", log_variables=list())
     # Log these variables during the time series loop
     ow.log_variable('res_load', 'p_mw')
     ow.log_variable('res_bus', 'vm_pu')
+    ow.log_variable('res_bus', 'va_degree')  # Log voltage angle in degrees
     ow.log_variable('res_line', 'loading_percent')
     ow.log_variable('res_line', 'i_ka')
     return ow
@@ -81,7 +85,7 @@ plt.title("Current Magnitude")
 plt.grid()
 plt.show()
 
-# Voltage angle results
+# load results
 load_file = os.path.join(output_dir, "res_load", "p_mw.xlsx")
 load_p_mw = pd.read_excel(load_file, index_col=0)
 load_p_mw.plot(label="p_mw")

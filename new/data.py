@@ -219,3 +219,69 @@ def calculate_bbus_matrix(net):
       
     return Bbus
 
+
+
+def manual_dc_timeseries2(time_steps, net, const_pv, const_load, Ybus):
+    results = {
+        "time_step": [],
+        "theta_degrees": [],
+        "line_loading_percent": [],
+        "line_current_mag": [],
+        "load_p_mw": [],
+        "sgen_p_mw": [],
+        "line_pl_mw": []  # Ensure this key is included
+    }
+
+    line_indices = None
+
+    for t in time_steps:
+        # Update controls using const_pv and const_load
+        const_pv.time_step(net, time=t)
+        const_load.time_step(net, time=t)
+
+        # Recalculate the power injection vector P immediately after the update
+        P = np.zeros(len(net.bus), dtype=np.float64)
+        if not net.load.empty:
+            P[net.load.bus.values.astype(int)] -= net.load.p_mw.values.astype(np.float64)
+        if not net.sgen.empty:
+            P[net.sgen.bus.values.astype(int)] += net.sgen.p_mw.values.astype(np.float64)
+
+        # Print load and generation values at each bus and time step
+        #print(f"Time step {t}:")
+        #print(f"Loads at each bus: {net.load.p_mw.values.tolist()}")
+        #print(f"Generation at each bus: {net.sgen.p_mw.values.tolist()}")
+        #print(f"Power Injection Vector (P): {P}")
+
+        # Run the DC load flow calculation
+        flow_results = run_dc_load_flow(Ybus, net, P)
+
+        if line_indices is None:
+            line_indices = flow_results['line_pl_mw'].index
+
+        results["time_step"].append(t)
+        results["theta_degrees"].append(flow_results['theta_degrees'])
+        results["line_loading_percent"].append(flow_results['line_loading_percent'].tolist())
+        results["line_current_mag"].append(flow_results['line_current_mag'].tolist())
+        results["load_p_mw"].append(net.load.p_mw.values.tolist())
+        results["sgen_p_mw"].append(net.sgen.p_mw.values.tolist())
+        results["line_pl_mw"].append(flow_results['line_pl_mw'].tolist())
+
+    theta_degrees_df = pd.DataFrame(results["theta_degrees"], index=results["time_step"], columns=net.bus.index)
+    line_loading_percent_df = pd.DataFrame(results["line_loading_percent"], index=results["time_step"], columns=line_indices)
+    line_current_mag_df = pd.DataFrame(results["line_current_mag"], index=results["time_step"], columns=line_indices)
+    load_p_mw_df = pd.DataFrame(results["load_p_mw"], index=results["time_step"], columns=net.load.index)
+    sgen_p_mw_df = pd.DataFrame(results["sgen_p_mw"], index=results["time_step"], columns=net.sgen.index)
+    line_pl_mw_df = pd.DataFrame(results["line_pl_mw"], index=results["time_step"], columns=line_indices)
+
+    results_df = pd.concat({
+        "theta_degrees": theta_degrees_df,
+        "line_loading_percent": line_loading_percent_df,
+        "line_current_mag": line_current_mag_df,
+        "load_p_mw": load_p_mw_df,
+        "sgen_p_mw": sgen_p_mw_df,
+        "line_pl_mw": line_pl_mw_df
+    }, axis=1)
+
+    results_df.to_excel("output_results.xlsx")
+    
+    return results_df

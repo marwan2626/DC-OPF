@@ -17,6 +17,7 @@ import pandapower.control as control
 from pandapower.control import ConstControl
 from pandapower.timeseries import OutputWriter, DFData
 
+
 def setup_grid():
     net = pn.create_cigre_network_lv()
 
@@ -60,7 +61,7 @@ def setup_grid():
     update_bus_references(net.switch, ['bus', 'element'])
 
     # Define the peak power for each bus
-    peak_power_dict = {12: 20, 16: 60, 17: 50, 18: 35, 19: 35}
+    peak_power_dict = {12: 200, 16: 600, 17: 500, 18: 350, 19: 350}
 
     # Add PV generators to the corresponding buses
     pv_buses = [12, 16, 17, 18, 19]
@@ -129,6 +130,7 @@ def setup_grid():
 
 
 
+
 def setup_grid_irep(season):
     net = pn.create_cigre_network_lv()
 
@@ -171,25 +173,26 @@ def setup_grid_irep(season):
     update_bus_references(net.switch, ['bus', 'element'])
 
     # Load the household load profile CSV and filter by season for bus 1
-    df_heatpump = pd.read_csv("heatpumpPrognosis.csv")
+    df_heatpump = pd.read_csv("heatpumpPrognosis.csv", sep=';')
     df_season_heatpump = df_heatpump[df_heatpump['season'] == season]
-    
+        
     # Process load profile for bus 1
     df_season_heatpump['meanP'] = df_season_heatpump['meanP'].str.replace(",", ".").astype(float)
     df_season_heatpump['stdP'] = df_season_heatpump['stdP'].str.replace(",", ".").astype(float)
     df_season_heatpump['meanQ'] = df_season_heatpump['meanQ'].str.replace(",", ".").astype(float)
     df_season_heatpump['stdQ'] = df_season_heatpump['stdQ'].str.replace(",", ".").astype(float)
-    
+    time_steps = df_season_heatpump.index
     # Create a DFData object for the load profile on bus 1
-    ds_load_heatpump = DFData(df_season_heatpump[['meanP']])
+    ds_load_heatpump = DFData(df_season_heatpump[['meanP']]/25000)  # Convert to MW
     
     # Set the load on bus 1 to follow this profile
-    load_bus_1 = net.load[net.load.bus == old_to_new_bus_map[1]].index
+    load_bus_1 = net.load.index.intersection([0])
+    net.load.at[load_bus_1, 'controllable'] = True
     const_load_heatpump = ConstControl(net, element='load', element_index=load_bus_1,
                                     variable='p_mw', data_source=ds_load_heatpump, profile_name="meanP")
 
     # Load the potato load profile CSV for buses 11, 15, 16, 17
-    df_household = pd.read_csv("householdPrognosis.csv")
+    df_household = pd.read_csv("householdPrognosis.csv", sep=';')
     
     # Process the potato load profile (assuming it contains the same columns)
     df_household['meanP'] = df_household['meanP'].str.replace(",", ".").astype(float)
@@ -198,12 +201,30 @@ def setup_grid_irep(season):
     df_household['stdQ'] = df_household['stdQ'].str.replace(",", ".").astype(float)
 
     # Create a DFData object for the load profile on buses 11, 15, 16, and 17
-    ds_load_household = DFData(df_household[['meanP']])
+    ds_load_household = DFData(df_household[['meanP']]/500000)  # Convert to MW
 
     # Set the load on buses 11, 15, 16, and 17 to follow this profile
-    load_buses = net.load[net.load.bus.isin([old_to_new_bus_map[11], old_to_new_bus_map[15], old_to_new_bus_map[16], old_to_new_bus_map[17]])].index
+    load_buses = net.load.index.intersection([1, 2, 3, 4, 5])
+    net.load.index.intersection([0, 1, 2, 3, 4, 5])
     const_load_household = ConstControl(net, element='load', element_index=load_buses,
                                      variable='p_mw', data_source=ds_load_household, profile_name="meanP")
+    
+       # Remove buses with prefixes "I" or "C" along with associated elements
+    buses_to_remove = net.bus[net.bus['name'].str.startswith(('Bus I', 'Bus C'))].index
+
+    if not buses_to_remove.empty:
+        # Drop the buses
+        net.bus.drop(buses_to_remove, inplace=True)
+        
+        # Remove loads, sgens, lines, transformers connected to those buses
+        net.load = net.load[~net.load.bus.isin(buses_to_remove)]
+        net.sgen = net.sgen[~net.sgen.bus.isin(buses_to_remove)]
+        net.line = net.line[~net.line.from_bus.isin(buses_to_remove) & ~net.line.to_bus.isin(buses_to_remove)]
+        net.trafo = net.trafo[~net.trafo.hv_bus.isin(buses_to_remove) & ~net.trafo.lv_bus.isin(buses_to_remove)]
+    
+    # Remove switches associated with the deleted buses
+    switches_to_remove = net.switch[(net.switch.bus.isin(buses_to_remove)) | (net.switch.element.isin(buses_to_remove))].index
+    net.switch.drop(switches_to_remove, inplace=True)
 
 
-    return net, ds_load_household, const_load_heatpump, ds_load_household, const_load_household
+    return net, const_load_heatpump, const_load_household, time_steps
