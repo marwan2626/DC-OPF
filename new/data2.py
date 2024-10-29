@@ -21,9 +21,17 @@ import matplotlib.pyplot as plt
 season = 'winter'
 net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump = gd.setup_grid_irep(season)
 
-covariance_matrix = drcc.calculate_covariance_matrix(df_season_heatpump)
+Bbus = dt.calculate_bbus_matrix(net)
 
-print(covariance_matrix)
+results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump, max_iter_drcc=10, alpha=0.05, eta=1e-3)
+
+pl.plot_opf_results(results)
+
+
+
+
+
+
 
 #net, df_pv, df, pv_generators, const_load, const_pv = gd.setup_grid()
 #time_steps = df_pv.index
