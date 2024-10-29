@@ -17,7 +17,7 @@ import opf as opf
 
 #net, df_pv, df, pv_generators, const_load, const_pv  = gd.setup_grid()
 season = 'winter'
-net, const_load_heatpump, const_load_household, time_steps = gd.setup_grid_irep(season)
+net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump = gd.setup_grid_irep(season)
 
 Bbus = dt.calculate_bbus_matrix(net)
 

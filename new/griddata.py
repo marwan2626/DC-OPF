@@ -138,6 +138,10 @@ def setup_grid_irep(season):
     net.switch.loc[1, "closed"] = False
     net.switch.loc[2, "closed"] = False
 
+    # Move the load with index 0 from bus 1 to bus 2
+    if 0 in net.load.index:
+        net.load.at[0, 'bus'] = 3
+
     # Iterate over all loads in the network and set controllable to False (i.e. not flexible)
     for load_idx in net.load.index:
         net.load.at[load_idx, 'controllable'] = False
@@ -183,7 +187,7 @@ def setup_grid_irep(season):
     df_season_heatpump['stdQ'] = df_season_heatpump['stdQ'].str.replace(",", ".").astype(float)
     time_steps = df_season_heatpump.index
     # Create a DFData object for the load profile on bus 1
-    ds_load_heatpump = DFData(df_season_heatpump[['meanP']]/25000)  # Convert to MW
+    ds_load_heatpump = DFData(df_season_heatpump[['meanP']]/180000)  # Convert to MW
     
     # Set the load on bus 1 to follow this profile
     load_bus_1 = net.load.index.intersection([0])
@@ -201,7 +205,7 @@ def setup_grid_irep(season):
     df_household['stdQ'] = df_household['stdQ'].str.replace(",", ".").astype(float)
 
     # Create a DFData object for the load profile on buses 11, 15, 16, and 17
-    ds_load_household = DFData(df_household[['meanP']]/500000)  # Convert to MW
+    ds_load_household = DFData(df_household[['meanP']]/150000)  # Convert to MW
 
     # Set the load on buses 11, 15, 16, and 17 to follow this profile
     load_buses = net.load.index.intersection([1, 2, 3, 4, 5])
@@ -227,4 +231,4 @@ def setup_grid_irep(season):
     net.switch.drop(switches_to_remove, inplace=True)
 
 
-    return net, const_load_heatpump, const_load_household, time_steps
+    return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump
