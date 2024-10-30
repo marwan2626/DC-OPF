@@ -23,11 +23,20 @@ net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump =
 
 Bbus = dt.calculate_bbus_matrix(net)
 
-results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump, max_iter_drcc=10, alpha=0.05, eta=1e-3)
+results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump, max_iter_drcc=10, alpha=0.01, eta=1e-4)
 
 pl.plot_opf_results(results)
 
-
+# # Plotting 'stdP' and 'meanP'
+# plt.figure(figsize=(12, 6))
+# plt.plot(df_season_heatpump['stdP'], label='stdP', color='b')
+# plt.plot(df_season_heatpump['meanP'], label='meanP', color='r')
+# plt.xlabel("Time Step")
+# plt.ylabel("Power (arbitrary units)")
+# plt.title("Heat Pump Forecast: Standard Deviation and Mean of Power")
+# plt.legend()
+# plt.grid(True)
+# plt.show()
 
 
 

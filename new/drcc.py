@@ -19,7 +19,7 @@ import opf
 
 def extract_line_currents(line_results, time_step):
     # Extracts the current magnitude for all lines at a given time_step
-    return {line: line_results[time_step]['line_current_mag'][line] for line in line_results[time_step]['line_current_mag'].keys()}
+    return {line: line_results[time_step]['line_loading_percent'][line] for line in line_results[time_step]['line_loading_percent'].keys()}
 
 
 def calculate_covariance_matrix(heatpumpForecast):
@@ -28,7 +28,7 @@ def calculate_covariance_matrix(heatpumpForecast):
         raise ValueError("DataFrame must contain 'stdP' for standard deviation values.")
 
     # Extract the 'stdP' values and square them to get the variance
-    variance = (heatpumpForecast['stdP']/180000) ** 2
+    variance = (heatpumpForecast['stdP']/5000) ** 2
 
     # Create a diagonal covariance matrix from the variance
     covariance_matrix = np.diag(variance)
@@ -44,8 +44,7 @@ def calculate_sensitivity(heatpumpForecast, opf_results, time_steps):
     
     # Initialize line currents at the first timestep
     line_currents_prev = extract_line_currents(opf_results['line_results'], time_steps[0])
-    #print(f"line_currents_prev: {line_currents_prev}")
-    sensitivity_results = {line: {} for line in line_currents_prev.keys()}
+    sensitivity_results = {t: {} for t in time_steps[1:]}  # Structured by timestep first
 
     for t in range(1, len(time_steps)):
         # Extract forecast standard deviation for each timestep
@@ -59,13 +58,13 @@ def calculate_sensitivity(heatpumpForecast, opf_results, time_steps):
         # Get current line currents
         line_currents_t = extract_line_currents(opf_results['line_results'], time_steps[t])
 
+        # Calculate sensitivity for each line
         for line in line_currents_prev.keys():
-            # Calculate sensitivity, handling the case where w_t == w_prev
             if w_t != w_prev:
                 sensitivity_value = (line_currents_t[line] - line_currents_prev[line]) / (w_t - w_prev)
-                sensitivity_results[line][time_steps[t]] = float(sensitivity_value)
+                sensitivity_results[time_steps[t]][line] = float(sensitivity_value)
             else:
-                sensitivity_results[line][time_steps[t]] = 0.0  # Use 0.0 to ensure it's a float
+                sensitivity_results[time_steps[t]][line] = 0.0  # Use 0.0 to ensure it's a float
 
         # Update previous line currents
         line_currents_prev = line_currents_t
@@ -73,26 +72,28 @@ def calculate_sensitivity(heatpumpForecast, opf_results, time_steps):
     return sensitivity_results
 
 
-def calculate_omega_I(alpha, sensitivity, cov_matrix):
-    # Initialize Omega_I_new to store results
-    Omega_I_new = {}
-    # Calculate scaling factor based on alpha
+def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
+    print('calculating omega I')
+    # Initialize Omega_I_new based on the provided structure of Omega_I
+    Omega_I_new = {t: {line: 0 for line in Omega_I[t]} for t in Omega_I}
+    
+    # Precompute scaling factor once
     scaling_factor = np.sqrt((1 - alpha) / alpha)
+    
+    # Precompute L2 norm of cov_matrix once
+    cov_norm = np.linalg.norm(cov_matrix, ord=2)
     
     # Iterate over each timestep and line sensitivity
     for t, sensitivity_t in sensitivity.items():
-        Omega_I_new[t] = {}
-        for line, sensitivity_value in sensitivity_t.items():
-            # Calculate product of sensitivity and covariance matrix
-            product = sensitivity_value * cov_matrix
-            
-            # Ensure product is numeric to avoid errors with norm calculation
-            if np.issubdtype(type(product), np.number) or np.issubdtype(product.dtype, np.number):
-                norm_L2 = np.linalg.norm(product, ord=2)
-                Omega_I_new[t][line] = scaling_factor * norm_L2
-            else:
-                raise ValueError(f"Non-numeric value encountered in 'product' for line {line} at timestep {t}")
+        sensitivities = np.array(list(sensitivity_t.values()))
+        # Calculate the norms for all sensitivities at once using the precomputed cov_norm
+        norms = np.abs(sensitivities) * cov_norm * scaling_factor
 
+        # Assign values to Omega_I_new in a vectorized way
+        for i, line in enumerate(sensitivity_t.keys()):
+            #print(f"t: {t}, line: {line}, sensitivity: {sensitivity_t.values()}")
+            Omega_I_new[t][line] = norms[i]
+    
     return Omega_I_new
 
 
@@ -281,7 +282,7 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             # Now, calculate the line loading percentage using the auxiliary variable
             if hasattr(line, 'max_i_ka'):
                 line_loading_percent = 100 * (abs_current_mag_ka / line.max_i_ka)
-                model.addConstr(line_loading_percent <= 100 - Omega_I[t][line.Index], name=f'line_loading_{t}_{line.Index}')
+                model.addConstr(line_loading_percent <= (100 - Omega_I[t][line.Index]), name=f'line_loading_{t}_{line.Index}')
 
             # Store results for each line in the time step
             line_results[t]["line_pl_mw"][line.Index] = power_flow_mw
@@ -358,13 +359,13 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
         return None
 
 
-def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, heatpumpForecast, max_iter_drcc=10, alpha=0.05, eta=1e-3):
+def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, heatpumpForecast, max_iter_drcc=10, alpha=0.05, eta=1e-6):
     # Step 1: Calculate covariance matrix once
     cov_matrix = calculate_covariance_matrix(heatpumpForecast)
     
     # Step 2: Initial OPF run with Omega_I = 0 (no constraint tightening)
-    Omega_I = {t: {line.Index: 0 for line in net.line.itertuples()} for t in time_steps}
-    drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I)
+    Omega_I_init = {t: {line.Index: 0 for line in net.line.itertuples()} for t in time_steps}
+    drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I_init)
     if drcc_opf_results is None:
         print("Initial OPF failed with Omega_I = 0")
         return None
@@ -376,25 +377,30 @@ def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, h
         print(f"Sensitivity calculated for DRCC iteration {drcc_iter + 1}")
         
         # Step 4: Calculate Omega_I using the updated sensitivity and covariance matrix
-        Omega_I_new = calculate_omega_I(alpha, sensitivity, cov_matrix)
+        Omega_I = calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I_init)
         print(f"Omega_I calculated for DRCC iteration {drcc_iter + 1}")
+        for t in Omega_I:
+            omega_values = list(Omega_I[t].values())
+            print(f"Timestep {t}: Omega_I min={min(omega_values)}, max={max(omega_values)}, mean={np.mean(omega_values)}")
+
+        for line in [0, 1, 2]:  # Sample first few lines for inspection
+            print(f"Timestep {t}, Line {line}: Loading constraint tightened to {100 - Omega_I[t][line]}%")
 
         # Ensure Omega_I retains consistent structure across iterations
-        for t in time_steps:
-            if t not in Omega_I_new:
-                Omega_I_new[t] = {}
-            for line in net.line.itertuples():
-                if line.Index not in Omega_I_new[t]:
-                    Omega_I_new[t][line.Index] = 0
+        # for t in time_steps:
+        #     if t not in Omega_I:
+        #         Omega_I[t] = {}
+        #     for line in net.line.itertuples():
+        #         if line.Index not in Omega_I[t]:
+        #             Omega_I[t][line.Index] = 0 
 
         # Check if Omega_I has converged
-        if drcc_iter > 0 and np.max([np.abs(Omega_I_new[t][line] - Omega_I[t][line]) 
+        if drcc_iter > 0 and np.max([np.abs(Omega_I[t][line] - Omega_I[t][line]) 
                                      for t in time_steps for line in Omega_I[t].keys()]) < eta:
             print(f"Converged in {drcc_iter + 1} DRCC iterations.")
             break
 
         # Update Omega_I and re-run OPF with the tightened constraints
-        Omega_I = Omega_I_new
         drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I)
         
         if drcc_opf_results is None:
