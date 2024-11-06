@@ -11,6 +11,7 @@ Plot File
 #### PACKAGES ####
 
 import matplotlib.pyplot as plt
+import pandas as pd
 
 def plot_load_p_mw(load_p_mw):
     plt.figure(figsize=(10, 5))
@@ -175,3 +176,42 @@ def plot_opf_results(results):
     plt.grid(True)
     plt.show()
 
+def plot_line_current_histogram(all_results, net, line_index, time_step):
+    # Collect line current data for the specified line and time step across all samples
+    line_current_magnitudes = []
+    for sample_results in all_results:
+        line_results = sample_results[2]  # Access the line DataFrame from the tuple (loads, buses, lines, trafos)
+        # Filter for the specific time step and retrieve the current for the specified line index
+        time_step_data = line_results[line_results['time_step'] == time_step]
+        
+        if not time_step_data.empty:
+            line_current_magnitudes.append(time_step_data['i_ka'].values[line_index])
+
+    if not line_current_magnitudes:
+        print(f"No data found for line index {line_index} at time step {time_step} across samples.")
+        return
+
+    # Convert to Series for easier statistical calculations
+    line_current_magnitudes = pd.Series(line_current_magnitudes)
+    
+    # Calculate the 95th percentile
+    percentile_95 = line_current_magnitudes.quantile(0.95)
+    
+    # Get the max allowable current from the network data
+    max_i_ka = net.line.loc[line_index, 'max_i_ka']
+    
+    # Plot the histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(line_current_magnitudes, bins=100, color='lightblue', edgecolor='black', alpha=0.7, label='Line Current Magnitude')
+    
+    # Plot the 95th percentile and max_i_ka as vertical lines
+    plt.axvline(percentile_95, color='orange', linestyle='--', linewidth=2, label=f'95th Percentile: {percentile_95:.3f} kA')
+    plt.axvline(max_i_ka, color='red', linestyle='-', linewidth=2, label=f'Max Allowable: {max_i_ka:.3f} kA')
+    
+    # Add labels and legend
+    plt.xlabel('Line Current Magnitude (kA)')
+    plt.ylabel('Frequency')
+    plt.title(f'Histogram of Line Current Magnitude for Line {line_index} at Time Step {time_step}')
+    plt.legend()
+    plt.grid(True)
+    plt.show()

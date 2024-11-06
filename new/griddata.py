@@ -17,6 +17,12 @@ import pandapower.control as control
 from pandapower.control import ConstControl
 from pandapower.timeseries import OutputWriter, DFData
 
+#### SCRIPTS ####
+import parameters as par
+
+###############################################################################
+## FUNCTIONS ##
+###############################################################################
 
 def setup_grid():
     net = pn.create_cigre_network_lv()
@@ -176,42 +182,65 @@ def setup_grid_irep(season):
     update_bus_references(net.trafo, ['hv_bus', 'lv_bus'])
     update_bus_references(net.switch, ['bus', 'element'])
 
-    # Load the household load profile CSV and filter by season for bus 1
-    df_heatpump = pd.read_csv("heatpumpPrognosis.csv", sep=';')
-    df_season_heatpump = df_heatpump[df_heatpump['season'] == season]
+    # Load the heatpump prognosis profile CSV and filter by season
+    df_heatpump_prognosis = pd.read_csv("heatpumpPrognosis.csv", sep=';')
+    df_season_heatpump_prognosis = df_heatpump_prognosis[df_heatpump_prognosis['season'] == season]
         
     # Process load profile for bus 1
-    df_season_heatpump['meanP'] = df_season_heatpump['meanP'].str.replace(",", ".").astype(float)
-    df_season_heatpump['stdP'] = df_season_heatpump['stdP'].str.replace(",", ".").astype(float)
-    df_season_heatpump['meanQ'] = df_season_heatpump['meanQ'].str.replace(",", ".").astype(float)
-    df_season_heatpump['stdQ'] = df_season_heatpump['stdQ'].str.replace(",", ".").astype(float)
-    time_steps = df_season_heatpump.index
+    df_season_heatpump_prognosis['meanP'] = df_season_heatpump_prognosis['meanP'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['stdP'] = df_season_heatpump_prognosis['stdP'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['meanQ'] = df_season_heatpump_prognosis['meanQ'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['stdQ'] = df_season_heatpump_prognosis['stdQ'].str.replace(",", ".").astype(float)
+    time_steps = df_season_heatpump_prognosis.index
     # Create a DFData object for the load profile on bus 1
-    ds_load_heatpump = DFData(df_season_heatpump[['meanP']]/180000)  # Convert to MW
+    ds_load_heatpump = DFData(df_season_heatpump_prognosis[['meanP']]/par.hp_scaling)  # Convert to MW
     
+    # Load the real load profile CSV
+    df_heatpump = pd.read_csv("realData_winter.csv", sep=';')
+        
+    # Process load profile for bus 1
+    df_heatpump['P_HEATPUMP'] = df_heatpump['P_HEATPUMP'].str.replace(",", ".").astype(float)
+    time_steps = df_heatpump.index
+    threshold = 0.5  # Z-score threshold for identifying outliers
+    mean = df_heatpump['P_HEATPUMP'].mean()
+    std = df_heatpump['P_HEATPUMP'].std()
+    z_scores = (df_heatpump['P_HEATPUMP'] - mean) / std
+    # Replace outliers with a rolling average (smoothing) or cap them
+    df_heatpump['P_HEATPUMP_smooth'] = np.where(
+        abs(z_scores) > threshold,
+        df_heatpump['P_HEATPUMP'].rolling(window=5, min_periods=1, center=True).mean(),
+        df_heatpump['P_HEATPUMP']
+    )
+
+    # Replace outliers with a rolling average (smoothing) or cap them
+    df_heatpump['P_HEATPUMP_smooth'] = np.where(
+        abs(z_scores) > threshold,
+        df_heatpump['P_HEATPUMP'].rolling(window=4, min_periods=1, center=True).mean(),
+        df_heatpump['P_HEATPUMP']
+    )
+    # Create a DFData object for the load profile on bus 1
+    ds_load_heatpump = DFData(df_heatpump[['P_HEATPUMP_smooth']]/par.hp_scaling)  # Convert to MW
+
     # Set the load on bus 1 to follow this profile
     load_bus_1 = net.load.index.intersection([0])
     net.load.at[load_bus_1, 'controllable'] = True
     const_load_heatpump = ConstControl(net, element='load', element_index=load_bus_1,
-                                    variable='p_mw', data_source=ds_load_heatpump, profile_name="meanP")
+                                    variable='p_mw', data_source=ds_load_heatpump, profile_name="P_HEATPUMP_smooth")
 
     # Load the potato load profile CSV for buses 11, 15, 16, 17
-    df_household = pd.read_csv("householdPrognosis.csv", sep=';')
+    df_household = pd.read_csv("realData_winter.csv", sep=';')
     
     # Process the potato load profile (assuming it contains the same columns)
-    df_household['meanP'] = df_household['meanP'].str.replace(",", ".").astype(float)
-    df_household['stdP'] = df_household['stdP'].str.replace(",", ".").astype(float)
-    df_household['meanQ'] = df_household['meanQ'].str.replace(",", ".").astype(float)
-    df_household['stdQ'] = df_household['stdQ'].str.replace(",", ".").astype(float)
+    df_household['P_HOUSEHOLD'] = df_household['P_HOUSEHOLD'].str.replace(",", ".").astype(float)
 
     # Create a DFData object for the load profile on buses 11, 15, 16, and 17
-    ds_load_household = DFData(df_household[['meanP']]/150000)  # Convert to MW
+    ds_load_household = DFData(df_household[['P_HOUSEHOLD']]/par.house_scaling)  # Convert to MW
 
     # Set the load on buses 11, 15, 16, and 17 to follow this profile
     load_buses = net.load.index.intersection([1, 2, 3, 4, 5])
     net.load.index.intersection([0, 1, 2, 3, 4, 5])
     const_load_household = ConstControl(net, element='load', element_index=load_buses,
-                                     variable='p_mw', data_source=ds_load_household, profile_name="meanP")
+                                     variable='p_mw', data_source=ds_load_household, profile_name="P_HOUSEHOLD")
     
        # Remove buses with prefixes "I" or "C" along with associated elements
     buses_to_remove = net.bus[net.bus['name'].str.startswith(('Bus I', 'Bus C'))].index
@@ -231,4 +260,4 @@ def setup_grid_irep(season):
     net.switch.drop(switches_to_remove, inplace=True)
 
 
-    return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump
+    return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_household

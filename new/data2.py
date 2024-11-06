@@ -15,17 +15,24 @@ import results as rs
 import plot as pl
 import opf as opf
 import drcc as drcc
+import montecarlo as mc
+
+#### PACKAGES ####
 import pandapower.plotting as pp
 import matplotlib.pyplot as plt
 
 season = 'winter'
-net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump = gd.setup_grid_irep(season)
+net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_household = gd.setup_grid_irep(season)
 
 Bbus = dt.calculate_bbus_matrix(net)
 
-results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump, max_iter_drcc=10, alpha=0.01, eta=1e-4)
+#results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, max_iter_drcc=10, alpha=0.01, eta=1e-3)
 
-pl.plot_opf_results(results)
+#pl.plot_opf_results(results)
+
+all_results = mc.montecarlo_analysis_parallel(net, time_steps, df_season_heatpump_prognosis, df_household, n_jobs=-1)
+
+pl.plot_line_current_histogram(all_results, net, line_index=0, time_step=437)
 
 # # Plotting 'stdP' and 'meanP'
 # plt.figure(figsize=(12, 6))

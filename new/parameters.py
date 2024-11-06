@@ -3,7 +3,7 @@ Code for the publication Exploiting Flexibility in Multi-Energy Systems
 through Distributionally Robust Chance-Constrained
 Optimization by Marwan Mostafa 
 
-Parameter File
+Parameters File
 """
 
 ###############################################################################
@@ -17,7 +17,7 @@ import numpy as np
 ## GUROBI PARAMETERS ## 
 ###############################################################################
 # gp.setParam("NonConvex",-1) # enable non convex constraints, enable = 2
-gp.setParam("OutputFlag",0) # solver output, enable = 1
+#gp.setParam("OutputFlag",0) # solver output, enable = 1
 # gp.setParam("DualReductions", 0) # check if feasible or unbounded: enable = 0
 # gp.setParam("MIPGap",2e-4) # MIP gap, default = 1e-4
 
@@ -26,7 +26,8 @@ gp.setParam("OutputFlag",0) # solver output, enable = 1
 ## GENERAL ## 
 ###############################################################################
 ### NETWORK ###
-
+hp_scaling = 160000 # heat pump scaling factor
+house_scaling = 200000 # household scaling factor
 
 ### TIME HORIZON ###
 
@@ -45,9 +46,7 @@ K_MAX = 5 # maximum inner lf iterations
 
 
 ### FORECAST ###
-#V_FCST = 1 # forecast version, for definition see forecast script header
-#PV_MAX = 8 # 8 kWp installations for data set to normalize
-N_DAY = 2 # number of days for monte-carlo simulation
+N_MC = 100 # number of samples for monte-carlo simulation
 
 
 ###############################################################################
