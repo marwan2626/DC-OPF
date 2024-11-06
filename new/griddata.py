@@ -223,7 +223,7 @@ def setup_grid_irep(season):
 
     # Set the load on bus 1 to follow this profile
     load_bus_1 = net.load.index.intersection([0])
-    net.load.at[load_bus_1, 'controllable'] = True
+    net.load.loc[load_bus_1, 'controllable'] = True
     const_load_heatpump = ConstControl(net, element='load', element_index=load_bus_1,
                                     variable='p_mw', data_source=ds_load_heatpump, profile_name="P_HEATPUMP_smooth")
 
