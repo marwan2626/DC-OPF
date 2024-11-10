@@ -87,6 +87,7 @@ def plot_opf_results(results):
     ext_grid_export = results['ext_grid_export']
     theta = results['theta']
     line_results = results['line_results']  # Assuming you have 'line_results' in the results
+    thermal_storage = results['thermal_storage']  # Thermal storage results
     
     # Get the list of time steps
     time_steps = list(pv_gen.keys())
@@ -173,6 +174,46 @@ def plot_opf_results(results):
     plt.ylabel('Line Current Magnitude (kA)')
     plt.title('Line Current Magnitude (kA) by Line and Time Step')
     plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    # Plot SOF (State of Fill) for each bus with thermal storage
+    plt.figure(figsize=(10, 6))
+    for bus in thermal_storage['ts_sof'][time_steps[0]].keys():
+        sof_values = [thermal_storage['ts_sof'][t][bus] for t in time_steps]
+        plt.plot(time_steps, sof_values, label=f'Bus {bus}')
+    plt.xlabel('Time Steps')
+    plt.ylabel('State of Fill (SOF)')
+    plt.title('Thermal Storage State of Fill (SOF) by Bus and Time Step')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    # Plot Power In and Power Out for Thermal Storage for each bus
+    plt.figure(figsize=(10, 6))
+    for bus in thermal_storage['ts_in'][time_steps[0]].keys():
+        ts_in_values = [thermal_storage['ts_in'][t][bus] for t in time_steps]
+        ts_out_values = [thermal_storage['ts_out'][t][bus] for t in time_steps]
+        plt.plot(time_steps, ts_in_values, label=f'Power In (Bus {bus})', linestyle='--')
+        plt.plot(time_steps, ts_out_values, label=f'Power Out (Bus {bus})', linestyle='-')
+    plt.xlabel('Time Steps')
+    plt.ylabel('Power (MW)')
+    plt.title('Thermal Storage Power In and Power Out by Bus and Time Step')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+
+
+
+def plot_curtailment(curtailment_factor, time_steps):
+    plt.figure(figsize=(10, 6))
+    plt.plot(time_steps, curtailment_factor)
+    plt.xlabel('Time Steps')
+    plt.ylabel('Curtailment Factor')
+    plt.title('Curtailment Factor Over Time')
+    plt.ylim(0, 1)  # Limits to keep the plot between 0 and 1
     plt.grid(True)
     plt.show()
 

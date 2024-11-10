@@ -85,14 +85,14 @@ def run_dc_load_flow(Bbus, net, P_mw):
 
         # Power flow calculation for transformer (similar to a line)
         power_flow_pu = (theta_full[hv_bus] - theta_full[lv_bus]) / x_pu
-        power_flow_mw = power_flow_pu * net.sn_mva / 1e6
+        power_flow_mw = power_flow_pu * net.sn_mva / 1e6  #1e6 nicht nötig
         
         # Account for transformer losses (copper and iron losses)
-        copper_losses_mw = (trafo.vkr_percent / 100) * net.sn_mva / 1e6  # Copper losses
+        copper_losses_mw = (trafo.vkr_percent / 100) * net.sn_mva / 1e6  # Copper losses #1e6 nicht nötig
         iron_losses_mw = trafo.pfe_kw / 1000  # Iron losses (already in kW)
 
         # Correct external grid power (subtract losses)
-        external_grid_power_mw = power_flow_mw - (copper_losses_mw + iron_losses_mw)
+        external_grid_power_mw = power_flow_mw - (copper_losses_mw + iron_losses_mw) #absolute needed because in some cases the transformer generated power
 
         transformer_pl_mw.append(external_grid_power_mw)  # Store the corrected external grid power
 

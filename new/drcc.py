@@ -13,15 +13,23 @@ import gurobipy as gp
 from gurobipy import GRB
 import pandas as pd
 import numpy as np
+import copy
 
 #### SCRIPTS ####
 import parameters as par 
+###############################################################################
+## AUXILIARY FUNCTIONS ##
+###############################################################################
 
 def extract_line_currents(line_results, time_step):
     # Extracts the current magnitude for all lines at a given time_step
     return {line: line_results[time_step]['line_loading_percent'][line] for line in line_results[time_step]['line_loading_percent'].keys()}
 
+###############################################################################
+## DRCC-OPF FUNCTIONS ##
+###############################################################################
 
+### calculate the covariance matrix ###
 def calculate_covariance_matrix(heatpumpForecast):
     # Ensure 'sigma P' is present in the DataFrame
     if 'stdP' not in heatpumpForecast.columns:
@@ -36,7 +44,7 @@ def calculate_covariance_matrix(heatpumpForecast):
 
     return covariance_matrix
 
-
+### calculate the sensitivity ###
 def calculate_sensitivity(heatpumpForecast, heatpumpReal, opf_results, time_steps, min_error_diff=1e-6):
     # Check if 'line_results' exists in opf_results
     if 'line_results' not in opf_results:
@@ -50,20 +58,13 @@ def calculate_sensitivity(heatpumpForecast, heatpumpReal, opf_results, time_step
     for t in range(1, len(time_steps)):
         # Calculate forecasting error ω for current and previous timestep
         w_t = float(heatpumpReal['P_HEATPUMP'].iloc[t] - heatpumpForecast['meanP'].iloc[t])
-        w_prev = float(heatpumpReal['P_HEATPUMP'].iloc[t - 1] - heatpumpForecast['meanP'].iloc[t - 1])
-
-        # Check if the difference in ω is significant; if not, skip to avoid unstable sensitivity values
-        if abs(w_t - w_prev) < min_error_diff:
-            for line in line_currents_prev.keys():
-                sensitivity_results[time_steps[t]][line] = 0.0
-            continue
 
         # Get current line currents from OPF results
         line_currents_t = extract_line_currents(opf_results['line_results'], time_steps[t])
 
         # Calculate sensitivity for each line relative to the previous timestep
         for line in line_currents_prev.keys():
-            sensitivity_value = (line_currents_t[line] - line_currents_prev[line]) / (w_t - w_prev)
+            sensitivity_value = (line_currents_t[line] - line_currents_prev[line]) / (w_t)
             sensitivity_results[time_steps[t]][line] = float(sensitivity_value)
 
         # Update `line_currents_prev` to the current timestep’s line currents
@@ -71,7 +72,7 @@ def calculate_sensitivity(heatpumpForecast, heatpumpReal, opf_results, time_step
 
     return sensitivity_results
 
-
+### calculate the omega I ###
 def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
     print('Calculating omega I')
     
@@ -98,7 +99,7 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
 
 
 
-
+### solve the OPF problem ###
 def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I):
     model = gp.Model("opf_with_dc_load_flow")
 
@@ -361,6 +362,7 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
         return None
 
 
+### DRCC-OPF function ###
 def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, heatpumpForecast, heatpumpReal, max_iter_drcc, alpha, eta):
     # Step 1: Calculate covariance matrix once
     cov_matrix = calculate_covariance_matrix(heatpumpForecast)
@@ -373,6 +375,7 @@ def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, h
         return None
 
     Omega_I_prev = Omega_I_init  # Store initial Omega_I as previous for first iteration
+    previous_max_diff = None  # To store max_diff from the previous iteration
 
     for drcc_iter in range(max_iter_drcc):
         print(f"Starting DRCC iteration {drcc_iter + 1}")
@@ -386,23 +389,36 @@ def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, h
         # Apply threshold limit to Omega_I
         for t in Omega_I:
             for line in Omega_I[t]:
-                if Omega_I[t][line] > 0.5:
-                    Omega_I[t][line] = 0.2
+                if Omega_I[t][line] >= 0.7:
+                    Omega_I[t][line] = 0.69
 
         print(f"Omega_I calculated for DRCC iteration {drcc_iter + 1}")
-        for t in Omega_I:
-            omega_values = list(Omega_I[t].values())
-            print(f"Timestep {t}: Omega_I min={min(omega_values)}, max={max(omega_values)}, mean={np.mean(omega_values)}")
+        # for t in Omega_I:
+        #     omega_values = list(Omega_I[t].values())
+        #     print(f"Timestep {t}: Omega_I min={min(omega_values)}, max={max(omega_values)}, mean={np.mean(omega_values)}")
 
-        
-        # Convergence check: Compare current Omega_I with previous
-        if drcc_iter > 0 and np.max([np.abs(Omega_I[t][line] - Omega_I_prev[t][line]) 
-                                     for t in time_steps for line in Omega_I[t].keys()]) < eta:
-            print(f"Converged in {drcc_iter + 1} DRCC iterations.")
+        max_diff = 0
+        max_diff_timestep = None
+        max_diff_line = None
+        for t in time_steps:
+            for line in Omega_I[t].keys():
+                diff = np.abs(Omega_I[t][line] - Omega_I_prev[t][line])
+                if diff > max_diff:
+                    max_diff = diff
+                    max_diff_timestep = t
+                    max_diff_line = line
+
+        # Print the max difference and the location details
+        print(f"DRCC Iteration {drcc_iter + 1}: Max Omega_I difference = {max_diff} at Timestep {max_diff_timestep}, Line {max_diff_line}")
+
+        # Check convergence based on change in max_diff between consecutive iterations
+        if previous_max_diff is not None and abs(max_diff - previous_max_diff) < eta:
+            print(f"Converged in {drcc_iter + 1} DRCC iterations based on max difference convergence.")
             break
 
-        # Update Omega_I_prev for next iteration
-        Omega_I_prev = Omega_I
+        # Update Omega_I_prev and previous_max_diff for next iteration
+        Omega_I_prev = copy.deepcopy(Omega_I)
+        previous_max_diff = max_diff
 
         # Re-run OPF with the updated Omega_I
         drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I)

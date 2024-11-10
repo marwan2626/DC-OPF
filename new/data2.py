@@ -26,13 +26,17 @@ net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_p
 
 Bbus = dt.calculate_bbus_matrix(net)
 
-#results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, max_iter_drcc=10, alpha=0.01, eta=1e-3)
+results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, max_iter_drcc=100, alpha=0.05, eta=1e-5)
+
+curtailment = rs.curtailment_calculation(results, df_heatpump)
+
+pl.plot_curtailment(curtailment, time_steps)
 
 #pl.plot_opf_results(results)
 
-all_results = mc.montecarlo_analysis_parallel(net, time_steps, df_season_heatpump_prognosis, df_household, n_jobs=-1)
+#all_results = mc.montecarlo_analysis_parallel(net, time_steps, df_season_heatpump_prognosis, df_household, n_jobs=-1)
 
-pl.plot_line_current_histogram(all_results, net, line_index=0, time_step=437)
+#l.plot_line_current_histogram(all_results, net, line_index=0, time_step=437)
 
 # # Plotting 'stdP' and 'meanP'
 # plt.figure(figsize=(12, 6))
