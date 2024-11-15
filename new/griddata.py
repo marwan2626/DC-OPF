@@ -13,9 +13,9 @@ import numpy as np
 import pandas as pd
 import pandapower as pp
 import pandapower.networks as pn
-import pandapower.control as control
 from pandapower.control import ConstControl
-from pandapower.timeseries import OutputWriter, DFData
+from pandapower.timeseries import DFData
+import simbench as sb
 
 #### SCRIPTS ####
 import parameters as par
@@ -137,7 +137,7 @@ def setup_grid():
 
 
 
-def setup_grid_irep(season):
+def setup_grid_transactions(season):
     net = pn.create_cigre_network_lv()
 
     # Switch off industrial and commercial loads
@@ -261,3 +261,156 @@ def setup_grid_irep(season):
 
 
     return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_household
+
+
+def reorder_buses_and_update_references(net):
+    # Create a copy of net.bus and reset the index
+    reordered_bus = pd.concat([net.bus.loc[129:129], net.bus.drop(129)]).reset_index(drop=False)
+
+    # Mapping of old bus indices to new ones
+    old_to_new_indices = {row['index']: idx for idx, row in reordered_bus.iterrows()}
+
+    # Update net.bus with the reordered DataFrame (drop the old index)
+    reordered_bus.drop(columns="index", inplace=True)
+    net.bus = reordered_bus
+
+    # Update all dependent DataFrames with the new mapping
+    def update_indices(df, col):
+        if col in df:
+            df[col] = df[col].map(old_to_new_indices)
+
+    # Update bus references in various components
+    update_indices(net.load, 'bus')
+    update_indices(net.line, 'from_bus')
+    update_indices(net.line, 'to_bus')
+    update_indices(net.trafo, 'hv_bus')
+    update_indices(net.trafo, 'lv_bus')
+    update_indices(net.ext_grid, 'bus')
+    update_indices(net.shunt, 'bus') if 'shunt' in net else None
+    update_indices(net.ward, 'bus') if 'ward' in net else None
+    update_indices(net.xward, 'bus') if 'xward' in net else None
+
+    return net
+
+def reorder_lines(net):
+    for line in net.line.itertuples():
+        # If from_bus > to_bus, swap them
+        if line.from_bus > line.to_bus:
+            # Swap from_bus and to_bus
+            net.line.loc[line.Index, ['from_bus', 'to_bus']] = line.to_bus, line.from_bus
+
+    return net
+
+def setup_grid_irep(season):
+    sb_code1 = "1-LV-semiurb4--0-no_sw"  # rural MV grid of scenario 0 with full switches
+    net = sb.get_simbench_net(sb_code1)
+    net = reorder_buses_and_update_references(net)
+    net = reorder_lines(net)
+
+    # Set ext_grid vm_pu to 1.0
+    net.ext_grid['vm_pu'] = 1.0
+
+
+    # Load the normalized household profile
+    df_household = pd.read_csv("realData_winter.csv", sep=';')
+    df_household['P_HOUSEHOLD'] = df_household['P_HOUSEHOLD'].str.replace(",", ".").astype(float)
+    time_steps = df_household.index
+    df_household['P_HOUSEHOLD_NORM'] = df_household['P_HOUSEHOLD'] / df_household['P_HOUSEHOLD'].max()
+
+    household_loads = net.load[net.load['name'].str.startswith("LV4.101")]
+    household_scaling_factors = household_loads['p_mw'].values
+    
+    # Create a scaled profile DataFrame
+    scaled_household_profiles = pd.DataFrame(
+        df_household['P_HOUSEHOLD_NORM'].values[:, None] * household_scaling_factors,
+        columns=household_loads.index
+    )
+
+    # Convert to DFData for dynamic control
+    ds_scaled_household_profiles = DFData(scaled_household_profiles)
+
+    # Add a single ConstControl to update p_mw
+    const_load_household = ConstControl(
+        net,
+        element="load",
+        variable="p_mw",  # Update p_mw directly
+        element_index=household_loads.index,  # Apply to all loads
+        profile_name=scaled_household_profiles.columns.tolist(),  # Profile for each load
+        data_source=ds_scaled_household_profiles
+    )
+
+    for load in household_loads.itertuples():
+    # Create a new load with modified parameters
+        pp.create_load(
+            net,
+            bus=load.bus,  # Use the same bus as the relevant load
+            p_mw=load.p_mw / 2,  # Half the p_mw of the relevant load
+            q_mvar=load.q_mvar,  # Same q_mvar
+            name=load.name.replace("LV4.101", "HP.101"),  # Change name prefix
+            scaling=load.scaling,  # Same scaling
+            const_z_percent=load.const_z_percent,  # Same const_z_percent
+            const_i_percent=load.const_i_percent,  # Same const_i_percent
+            voltLvl=load.voltLvl,  # Same voltLvl
+            sn_mva=load.sn_mva,  # Same sn_mva
+            subnet=load.subnet  # Same subnet
+        )
+    
+    heatpump_loads = net.load[net.load['name'].str.startswith("HP.101")]
+    # Load the real load profile CSV
+    df_heatpump = pd.read_csv("realData_winter.csv", sep=';')
+        
+    # Process load profile for bus 1
+    df_heatpump['P_HEATPUMP'] = df_heatpump['P_HEATPUMP'].str.replace(",", ".").astype(float)
+    time_steps = df_heatpump.index
+    threshold = 0.5  # Z-score threshold for identifying outliers
+    mean = df_heatpump['P_HEATPUMP'].mean()
+    std = df_heatpump['P_HEATPUMP'].std()
+    z_scores = (df_heatpump['P_HEATPUMP'] - mean) / std
+    # Replace outliers with a rolling average (smoothing) or cap them
+    df_heatpump['P_HEATPUMP_smooth'] = np.where(
+        abs(z_scores) > threshold,
+        df_heatpump['P_HEATPUMP'].rolling(window=5, min_periods=1, center=True).mean(),
+        df_heatpump['P_HEATPUMP']
+    )
+
+    # Replace outliers with a rolling average (smoothing) or cap them
+    df_heatpump['P_HEATPUMP_smooth'] = np.where(
+        abs(z_scores) > threshold,
+        df_heatpump['P_HEATPUMP'].rolling(window=4, min_periods=1, center=True).mean(),
+        df_heatpump['P_HEATPUMP']
+    )
+
+    df_heatpump['P_HEATPUMP_NORM'] = df_heatpump['P_HEATPUMP_smooth'] / df_heatpump['P_HEATPUMP_smooth'].max()
+
+    heatpump_scaling_factors = heatpump_loads['p_mw'].values
+
+    # Create a scaled heatpump profile DataFrame
+    scaled_heatpump_profiles = pd.DataFrame(
+        df_heatpump['P_HEATPUMP_NORM'].values[:, None] * heatpump_scaling_factors,
+        columns=heatpump_loads.index
+    )
+
+    # Convert to DFData for dynamic control
+    ds_scaled_heatpump_profiles = DFData(scaled_heatpump_profiles)
+
+    # Add a single ConstControl to update p_mw
+    const_load_heatpump = ConstControl(
+        net,
+        element="load",
+        variable="p_mw",  # Update p_mw directly
+        element_index=heatpump_loads.index,  # Apply to all loads
+        profile_name=scaled_heatpump_profiles.columns.tolist(),  # Profile for each load
+        data_source=ds_scaled_heatpump_profiles
+    )
+
+    
+    # Iterate over all loads in the network and set controllable to False (i.e. not flexible)
+    for load_idx in heatpump_loads.index:
+        net.load.at[load_idx, 'controllable'] = True
+
+    for load_idx in household_loads.index:
+        net.load.at[load_idx, 'controllable'] = False
+
+
+    return net, const_load_household, const_load_heatpump, time_steps, df_household, df_heatpump
+#return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_households

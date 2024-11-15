@@ -97,8 +97,6 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
     return Omega_I_new
 
 
-
-
 ### solve the OPF problem ###
 def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I):
     model = gp.Model("opf_with_dc_load_flow")
@@ -111,6 +109,9 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
 
     epsilon = 100e-9  # Small positive value to ensure some external grid usage
 
+    # Extract transformer capacity in MW (assuming sn_mva is in MVA)
+    transformer_capacity_mw = net.trafo['sn_mva'].values[0]*2
+
 
     # Initialize decision variables
     pv_gen_vars = {}  # Store PV generation decision variables
@@ -119,7 +120,11 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
     theta_vars = {}  # Store voltage angle decision variables (radians)
     curtailment_vars = {} # Store decision variables for curtailment
     flexible_load_vars = {}  # New flexible load variables
-    flex_load_curtailment_vars = {}  # New flexible load curtailment variables
+
+    # Add thermal storage variables
+    ts_in_vars = {t: {} for t in time_steps}
+    ts_out_vars = {t: {} for t in time_steps}
+    ts_sof_vars = {t: {} for t in time_steps}
 
 
     slack_bus_index = net.ext_grid.bus.iloc[0]
@@ -135,6 +140,12 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
     ext_grid_export_results = {}
     theta_results = {}
     line_results = {}
+    transformer_loading_results = {}
+    thermal_storage_results = {
+        'ts_in': {t: {} for t in time_steps},
+        'ts_out': {t: {} for t in time_steps},
+        'ts_sof': {t: {} for t in time_steps}
+    }
 
     # Temporary dictionary to store updated load values per time step
     time_synchronized_loads = {t: {} for t in time_steps}
@@ -176,31 +187,51 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
         ext_grid_export_vars[t] = model.addVar(lb=0, name=f'ext_grid_export_{t}')  # Export is non-negative
         model.addConstr(ext_grid_import_vars[t] + ext_grid_export_vars[t] >= epsilon, name=f'nonzero_ext_grid_usage_{t}')
 
+        # Limit grid import and export based on transformer capacity
+        model.addConstr(
+            ext_grid_import_vars[t] <= transformer_capacity_mw, 
+            name=f'limit_import_{t}'
+        )
+        model.addConstr(
+            ext_grid_export_vars[t] <= transformer_capacity_mw, 
+            name=f'limit_export_{t}'
+        )
         # Voltage angle variables for all buses
         theta_vars[t] = model.addVars(net.bus.index, lb=-GRB.INFINITY, name=f'theta_{t}')
 
         # Fix the slack bus angle to 0 radians
         model.addConstr(theta_vars[t][slack_bus_index] == 0, name=f'slack_theta_{t}')
 
-        # Flexible load variable at bus 1   
+
+        # Define flexible load variables with global peak limit (par.hp_max_power)
         flexible_load_vars[t] = model.addVars(
             flexible_load_buses,
             lb=0,
-            ub={bus: time_synchronized_loads[t][bus] for bus in flexible_load_buses},
+            ub=par.hp_max_power,
             name=f'flexible_load_{t}'
         )
-            
-        flex_load_curtailment_vars[t] = model.addVars(
-        flexible_load_buses,
-        lb=0,
-        ub={bus: time_synchronized_loads[t][bus] for bus in flexible_load_buses},
-        name=f'flex_load_curtailment_{t}'
-        )
 
+    # Add thermal storage variables      
+    # Update SOF constraints for each flexible load bus
+    for t_idx, t in enumerate(time_steps):
         for bus in flexible_load_buses:
-            original_load = time_synchronized_loads[t][bus]
-            model.addConstr(flex_load_curtailment_vars[t][bus] == original_load - flexible_load_vars[t][bus],
-                            name=f'flex_load_curtailment_constraint_{t}_{bus}')
+            ts_in_vars[t][bus] = model.addVar(lb=0, ub=par.ts_in_max, name=f'ts_in_{t}_{bus}')
+            ts_out_vars[t][bus] = model.addVar(lb=0, ub=par.ts_out_max, name=f'ts_out_{t}_{bus}')
+            ts_sof_vars[t][bus] = model.addVar(lb=0, ub=1.0, name=f'ts_sof_{t}_{bus}')  # SOF as percentage (0 to 1)
+
+            # SOF Update Constraint for each bus at each time step
+            if t_idx == 0:  # Initial time step
+                model.addConstr(
+                    ts_sof_vars[t][bus] == 0.5 + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
+                    name=f'sof_update_{t}_{bus}'
+                )
+            else:
+                # Reference the previous time step directly using t_idx - 1
+                model.addConstr(
+                    ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t_idx - 1]][bus]
+                    + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
+                    name=f'sof_update_{t}_{bus}'
+                )
 
     # Add power balance and load flow constraints for each time step
     for t in time_steps:
@@ -210,6 +241,40 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
         for i, bus in enumerate(net.bus.index):
             if bus in net.load.bus.values:
                 if bus in flexible_load_buses:
+                    # Define the heat demand for the bus, representing the electrical equivalent
+                    heat_demand = time_synchronized_loads[t][bus]  # or load profile representing heat demand
+
+                    # 1. Heat Demand Coverage: flexible_load_vars and/or thermal storage must meet the demand
+                    model.addConstr(
+                        flexible_load_vars[t][bus] + ((ts_out_vars[t][bus] - ts_in_vars[t][bus]) / par.COP) >= heat_demand,
+                        name=f'heat_demand_coverage_{t}_{bus}'
+                    )
+
+                    # 3. Storage Charging: use excess power for storage charging if available
+                    model.addConstr(
+                        ts_in_vars[t][bus] <= par.hp_max_power,
+                        name=f'storage_charging_{t}_{bus}'
+                    )
+
+                    model.addConstr(
+                        ts_out_vars[t][bus] <= par.ts_out_max,
+                        name=f'storage_charging_{t}_{bus}'
+                    )
+
+                    # Update the state of fill (SOF) of the storage
+                    # Initial SOF Constraint for the first timestep
+                    if t == time_steps[0]:
+                        model.addConstr(
+                            ts_sof_vars[t][bus] == par.ts_sof_init,
+                            name=f'storage_initial_sof_{bus}'
+                        )
+                    else:
+                        # Update SOF based on the previous timestep
+                        model.addConstr(
+                            ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t - 1]][bus] + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
+                            name=f'storage_state_update_{t}_{bus}'
+                        )
+
                     # Use the flexible load variable for controllable loads
                     P_injected[bus] -= flexible_load_vars[t][bus]
                 else:
@@ -254,6 +319,10 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
                                 for bus in net.load.bus.values if bus not in flexible_load_buses)        
         model.addConstr(ext_grid_import_vars[t] - ext_grid_export_vars[t] == total_load - total_generation, name=f'power_balance_slack_{t}')
 
+    # Enforce final state of fill to match initial state (0.5) for all flexible load buses
+    for bus in flexible_load_buses:
+        model.addConstr(ts_sof_vars[time_steps[-1]][bus] == 0.5, name=f'final_sof_balance_{bus}')
+
 
     # Line power flow and loading constraints (with the corrected expression)
     for t in time_steps:
@@ -292,12 +361,20 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             line_results[t]["line_loading_percent"][line.Index] = line_loading_percent            
             line_results[t]["line_current_mag"][line.Index] = current_mag_ka
 
+        transformer_loading_results[t] = model.addVar(lb=0, ub=100, name=f'transformer_loading_{t}')
+        model.addConstr(
+            transformer_loading_results[t] == ((ext_grid_import_vars[t] + ext_grid_export_vars[t]) / transformer_capacity_mw) * 100,
+            name=f'transformer_loading_percentage_{t}'
+        )
+
     # Objective: Minimize total cost (import, export, and curtailment costs)
-    total_cost = gp.quicksum(import_cost * ext_grid_import_vars[t] +
-                         export_cost * ext_grid_export_vars[t] +
-                         (gp.quicksum(curtailment_cost * curtailment_vars[t][bus] for bus in pv_buses) if len(pv_buses) > 0 else 0) +
-                         gp.quicksum(flexibility_cost * flex_load_curtailment_vars[t][bus] for bus in flexible_load_buses)
-                         for t in time_steps)
+    total_cost = gp.quicksum(
+        import_cost * ext_grid_import_vars[t] +
+        export_cost * ext_grid_export_vars[t] +
+        (gp.quicksum(curtailment_cost * curtailment_vars[t][bus] for bus in pv_buses) if len(pv_buses) > 0 else 0) +
+        gp.quicksum(flexibility_cost * ts_out_vars[t][bus] for bus in flexible_load_buses)
+        for t in time_steps
+    )
     model.setObjective(total_cost, GRB.MINIMIZE)
 
     # After adding all constraints and variables
@@ -315,6 +392,7 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             ext_grid_import_results[t] = ext_grid_import_vars[t].x
             ext_grid_export_results[t] = ext_grid_export_vars[t].x
             theta_results[t] = {bus: theta_vars[t][bus].x for bus in net.bus.index}
+            transformer_loading_results[t] = transformer_loading_results[t].x
             
             load_results[t] = {
                 bus: flexible_load_vars[t][bus].x if bus in flexible_load_buses else 
@@ -322,22 +400,16 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
                 for bus in net.bus.index
             }
 
+            # Extract thermal storage results for each flexible load bus
+            thermal_storage_results['ts_in'][t] = {bus: ts_in_vars[t][bus].x for bus in flexible_load_buses}
+            thermal_storage_results['ts_out'][t] = {bus: ts_out_vars[t][bus].x for bus in flexible_load_buses}
+            thermal_storage_results['ts_sof'][t] = {bus: ts_sof_vars[t][bus].x for bus in flexible_load_buses}
+
             # Extract numerical values for line results
             for line in net.line.itertuples():
                 line_results[t]["line_pl_mw"][line.Index] = line_results[t]["line_pl_mw"][line.Index].getValue()
                 line_results[t]["line_loading_percent"][line.Index] = line_results[t]["line_loading_percent"][line.Index].getValue()
                 line_results[t]["line_current_mag"][line.Index] = line_results[t]["line_current_mag"][line.Index].getValue()
-
-            # After optimization, print the key variable results
-            #print(f"Time Step {t}:")
-            #print(f"PV Generation: {[pv_gen_vars[t][bus].x for bus in pv_buses]}")
-            #print(f"External Grid Import: {ext_grid_import_vars[t].x}")
-            #print(f"External Grid Export: {ext_grid_export_vars[t].x}")
-            #print(f"Theta (angles): {[theta_vars[t][bus].x for bus in net.bus.index]}")
-
-            #for line in net.line.itertuples():
-                #print(f"Line {line.Index}: Power Flow MW = {line_results[t]['line_pl_mw'][line.Index]}, Loading % = {line_results[t]['line_loading_percent'][line.Index]}")
-
 
         # Return results in a structured format
         results = {
@@ -346,7 +418,9 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             'ext_grid_import': ext_grid_import_results,
             'ext_grid_export': ext_grid_export_results,
             'theta': theta_results,  # Add theta results to the final results
-            'line_results': line_results  # Line-specific results added
+            'line_results': line_results,  # Line-specific results added
+            'transformer_loading': transformer_loading_results,
+            'thermal_storage': thermal_storage_results  #  thermal storage results
         }
         
         return results

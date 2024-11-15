@@ -88,6 +88,7 @@ def plot_opf_results(results):
     theta = results['theta']
     line_results = results['line_results']  # Assuming you have 'line_results' in the results
     thermal_storage = results['thermal_storage']  # Thermal storage results
+    transformer_loading = results.get('transformer_loading', {})  # Transformer loading results 
     
     # Get the list of time steps
     time_steps = list(pv_gen.keys())
@@ -125,6 +126,17 @@ def plot_opf_results(results):
     plt.xlabel('Time Steps')
     plt.ylabel('Power (MW)')
     plt.title('External Grid Import and Export over Time')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+    # Plot Transformer Loading Percentage
+    plt.figure(figsize=(10, 6))
+    transformer_loading_values = [transformer_loading[t] for t in time_steps]
+    plt.plot(time_steps, transformer_loading_values, label='Transformer Loading (%)', color='blue')
+    plt.xlabel('Time Steps')
+    plt.ylabel('Loading (%)')
+    plt.title('Transformer Loading Percentage over Time')
     plt.legend()
     plt.grid(True)
     plt.show()

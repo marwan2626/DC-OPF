@@ -29,12 +29,12 @@ import numpy as np
 hp_scaling = 80000 # heat pump scaling factor
 house_scaling = 400000 # household scaling factor
 
-hp_max_power = 0.5 # heat pump max power in MW
-ts_size_mwh = 8 # thermal storage size in MWh
+hp_max_power = 2 # heat pump max power in MW
+ts_size_mwh = 10 # thermal storage size in MWh
 ts_sof_init = 0.5 # initial state of fill of thermal storage
 ts_eff = 0.95 # thermal storage efficiency
-ts_out_max = 0.5 # thermal storage max output in MWth
-ts_in_max = 1 # thermal storage max input in MWth
+ts_out_max = 2 # thermal storage max output in MWth
+ts_in_max = 2 # thermal storage max input in MWth
 COP = 3 # heat pump COP
 
 ### TIME HORIZON ###

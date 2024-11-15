@@ -19,7 +19,7 @@ import pandapower as pp
 
 # Set up the grid and time series data
 season = 'winter'
-net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_household = gd.setup_grid_irep(season)
+net, const_load_household, const_load_heatpump, time_steps, df_household, df_heatpump = gd.setup_grid_irep(season)
 
 #net, df_pv, df, pv_generators, const_load, const_pv = gd.setup_grid()
 #time_steps = df_pv.index
