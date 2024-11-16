@@ -305,7 +305,11 @@ def setup_grid_irep(season):
     sb_code1 = "1-LV-semiurb4--0-no_sw"  # rural MV grid of scenario 0 with full switches
     net = sb.get_simbench_net(sb_code1)
     net = reorder_buses_and_update_references(net)
-    net = reorder_lines(net)
+    #net = reorder_lines(net)
+    line_indices = [24, 28, 23, 0, 4, 19, 11, 5, 22, 18, 6, 20, 31, 13, 17, 29, 7, 12, 16]  # List of line indices to reverse
+
+    for idx in line_indices:
+        net.line.loc[idx, ['from_bus', 'to_bus']] = net.line.loc[idx, ['to_bus', 'from_bus']].values
 
     # Set ext_grid vm_pu to 1.0
     net.ext_grid['vm_pu'] = 1.0

@@ -31,6 +31,7 @@ def create_output_writer(net, time_steps, output_dir):
     ow.log_variable('res_load', 'p_mw')
     ow.log_variable('res_bus', 'vm_pu')
     ow.log_variable('res_bus', 'va_degree')  # Log voltage angle in degrees
+    ow.log_variable('res_bus', 'p_mw')  # Log bus active power
     ow.log_variable('res_line', 'loading_percent')
     ow.log_variable('res_line', 'i_ka')
     return ow
@@ -61,6 +62,16 @@ vm_pu.plot(label="vm_pu")
 plt.xlabel("time step")
 plt.ylabel("voltage mag. [p.u.]")
 plt.title("Voltage Magnitude")
+plt.grid()
+plt.show()
+
+# Voltage results
+bus_pmw_file = os.path.join(output_dir, "res_bus", "p_mw.xlsx")
+bus_p_mw = pd.read_excel(bus_pmw_file, index_col=0)
+bus_p_mw.plot(label="p_mw")
+plt.xlabel("time step")
+plt.ylabel("power [MW]")
+plt.title("Power")
 plt.grid()
 plt.show()
 

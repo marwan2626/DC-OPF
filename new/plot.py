@@ -12,6 +12,8 @@ Plot File
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import plotly.graph_objects as go
+import pandapower.plotting.plotly as pp_plotly
 
 def plot_load_p_mw(load_p_mw):
     plt.figure(figsize=(10, 5))
@@ -268,3 +270,133 @@ def plot_line_current_histogram(all_results, net, line_index, time_step):
     plt.legend()
     plt.grid(True)
     plt.show()
+
+def plot_opf_results_plotly(results,net):
+    # Extract the results from the dictionary
+    pv_gen = results['pv_gen']
+    load = results['load']
+    ext_grid_import = results['ext_grid_import']
+    ext_grid_export = results['ext_grid_export']
+    theta = results['theta']
+    line_results = results['line_results']
+    thermal_storage = results['thermal_storage']
+    transformer_loading = results.get('transformer_loading', {})
+    
+    # Get the list of time steps
+    time_steps = list(pv_gen.keys())
+
+    # Plot pandapower grid using simple_plotly
+    fig = pp_plotly.simple_plotly(net)
+    fig.show()
+
+    # Plot PV Generation
+    fig = go.Figure()
+    for bus in pv_gen[time_steps[0]].keys():
+        pv_values = [pv_gen[t][bus] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=pv_values, mode='lines', name=f'Bus {bus}'))
+    fig.update_layout(title='PV Generation by Bus and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='PV Generation (MW)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot Load
+    fig = go.Figure()
+    for bus in load[time_steps[0]].keys():
+        load_values = [load[t][bus] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=load_values, mode='lines', name=f'Bus {bus}'))
+    fig.update_layout(title='Load by Bus and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Load (MW)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot External Grid Import/Export
+    fig = go.Figure()
+    ext_import_values = [ext_grid_import[t] for t in time_steps]
+    ext_export_values = [ext_grid_export[t] for t in time_steps]
+    fig.add_trace(go.Scatter(x=time_steps, y=ext_import_values, mode='lines', name='Import (MW)', line=dict(color='green')))
+    fig.add_trace(go.Scatter(x=time_steps, y=ext_export_values, mode='lines', name='Export (MW)', line=dict(color='red')))
+    fig.update_layout(title='External Grid Import and Export over Time',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Power (MW)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot Transformer Loading
+    fig = go.Figure()
+    transformer_loading_values = [transformer_loading[t] for t in time_steps]
+    fig.add_trace(go.Scatter(x=time_steps, y=transformer_loading_values, mode='lines', name='Transformer Loading (%)'))
+    fig.update_layout(title='Transformer Loading Percentage over Time',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Loading (%)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot Theta (Voltage Angles)
+    fig = go.Figure()
+    for bus in theta[time_steps[0]].keys():
+        theta_values = [theta[t][bus] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=theta_values, mode='lines', name=f'Bus {bus}'))
+    fig.update_layout(title='Voltage Angle Theta by Bus and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Voltage Angle (Radians)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot Line Power Flow
+    fig = go.Figure()
+    for line in line_results[time_steps[0]]['line_pl_mw'].keys():
+        line_pl_mw_values = [line_results[t]['line_pl_mw'][line] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=line_pl_mw_values, mode='lines', name=f'Line {line}'))
+    fig.update_layout(title='Line Power Flow (MW) by Line and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Line Power Flow (MW)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot Line Current
+    fig = go.Figure()
+    for line in line_results[time_steps[0]]['line_current_mag'].keys():
+        line_current_values = [line_results[t]['line_current_mag'][line] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=line_current_values, mode='lines', name=f'Line {line}'))
+    fig.update_layout(title='Line Current Magniture (kA) by Line and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Line Power Flow (MW)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot Line Loading
+    fig = go.Figure()
+    for line in line_results[time_steps[0]]['line_loading_percent'].keys():
+        line_loading_values = [line_results[t]['line_loading_percent'][line] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=line_loading_values, mode='lines', name=f'Line {line}'))
+    fig.update_layout(title='Line Loading Percentage by Line and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Line Loading (%)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot SOF (State of Fill)
+    fig = go.Figure()
+    for bus in thermal_storage['ts_sof'][time_steps[0]].keys():
+        sof_values = [thermal_storage['ts_sof'][t][bus] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=sof_values, mode='lines', name=f'Bus {bus}'))
+    fig.update_layout(title='Thermal Storage State of Fill (SOF) by Bus and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='State of Fill (SOF)',
+                    hovermode="x unified")
+    fig.show()
+
+    # Plot Power In and Out for Thermal Storage
+    fig = go.Figure()
+    for bus in thermal_storage['ts_in'][time_steps[0]].keys():
+        ts_in_values = [thermal_storage['ts_in'][t][bus] for t in time_steps]
+        ts_out_values = [thermal_storage['ts_out'][t][bus] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=ts_in_values, mode='lines', name=f'Power In (Bus {bus})', line=dict(dash='dash')))
+        fig.add_trace(go.Scatter(x=time_steps, y=ts_out_values, mode='lines', name=f'Power Out (Bus {bus})'))
+    fig.update_layout(title='Thermal Storage Power In and Out by Bus and Time Step',
+                    xaxis_title='Time Steps',
+                    yaxis_title='Power (MW)',
+                    hovermode="x unified")
+    fig.show()
