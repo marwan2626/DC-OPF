@@ -285,9 +285,9 @@ def plot_opf_results_plotly(results,net):
     # Get the list of time steps
     time_steps = list(pv_gen.keys())
 
-    # Plot pandapower grid using simple_plotly
-    fig = pp_plotly.simple_plotly(net)
-    fig.show()
+    # # Plot pandapower grid using simple_plotly
+    # fig = pp_plotly.simple_plotly(net)
+    # fig.show()
 
     # Plot PV Generation
     fig = go.Figure()
@@ -360,11 +360,53 @@ def plot_opf_results_plotly(results,net):
     for line in line_results[time_steps[0]]['line_current_mag'].keys():
         line_current_values = [line_results[t]['line_current_mag'][line] for t in time_steps]
         fig.add_trace(go.Scatter(x=time_steps, y=line_current_values, mode='lines', name=f'Line {line}'))
-    fig.update_layout(title='Line Current Magniture (kA) by Line and Time Step',
+    fig.update_layout(title='Line Current Magnitude (kA) by Line and Time Step',
                     xaxis_title='Time Steps',
-                    yaxis_title='Line Power Flow (MW)',
+                    yaxis_title='Line Current Magnitude (kA)',
                     hovermode="x unified")
     fig.show()
+
+    # Plot Line Current Magnitude as Bar Plot
+    line_min_values = {}
+    line_max_values = {}
+    line_mean_values = {}
+    # Compute min, max, and mean for each line
+    for line in line_results[time_steps[0]]['line_current_mag'].keys():
+        line_current_values = [line_results[t]['line_current_mag'][line] for t in time_steps]
+        line_min_values[line] = min(line_current_values)
+        line_max_values[line] = max(line_current_values)
+        line_mean_values[line] = sum(line_current_values) / len(line_current_values)
+    # Create the bar plot
+    fig = go.Figure()   
+    # Add bars for min-max range
+    for line in line_min_values.keys():
+        fig.add_trace(go.Bar(
+            x=[line],  # Line index
+            y=[line_max_values[line] - line_min_values[line]],  # Height of the bar is the range
+            base=[line_min_values[line]],  # Base starts at the min value
+            name=f'Line {line}',
+            marker=dict(color='blue', opacity=0.7)
+        ))
+    # Add a line for the mean value
+    fig.add_trace(go.Scatter(
+        x=list(line_mean_values.keys()),  # Line indices
+        y=list(line_mean_values.values()),  # Mean current magnitudes
+        mode='lines+markers',
+        name='Mean Current Magnitude',
+        line=dict(color='red', width=2),
+        marker=dict(size=8)
+    ))
+    # Update layout for the plot
+    fig.update_layout(
+        title='Line Current Magnitude (Min, Max, and Mean) by Line',
+        xaxis_title='Line Index',
+        yaxis_title='Current Magnitude (kA)',
+        barmode='overlay',
+        hovermode="x unified"
+    )
+
+    fig.show()
+
 
     # Plot Line Loading
     fig = go.Figure()
