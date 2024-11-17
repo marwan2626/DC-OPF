@@ -1278,14 +1278,11 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
     flexible_time_synchronized_loads = {t: {} for t in time_steps}
     non_flexible_time_synchronized_loads = {t: {} for t in time_steps}
 
-    #flexible_loads = net.load[net.load['controllable'] == True]
-    #non_flexible_loads = net.load[net.load['controllable'] == False]
-
     # Identify buses with flexible loads
     flexible_load_buses = list(set(net.load[net.load['controllable'] == True].bus.values))
     non_flexible_load_buses = list(set(net.load[net.load['controllable'] == False].bus.values))
+    #print(f"Flexible load buses: {flexible_load_buses}")
 
-    print(f"Flexible load buses: {flexible_load_buses}")
     # Add variables for each time step
     for t in time_steps:
         # Update const_pv and const_load for this time step
@@ -1317,7 +1314,6 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
                 flexible_time_synchronized_loads[t][bus] = 0.0
             if bus not in non_flexible_time_synchronized_loads[t]:
                 non_flexible_time_synchronized_loads[t][bus] = 0.0
-
 
         # Extract the bus indices where PV generators are connected (from net.sgen.bus)
         pv_buses = net.sgen.bus.values
@@ -1369,19 +1365,6 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
             ts_out_vars[t][bus] = model.addVar(lb=0, ub=par.ts_out_max, name=f'ts_out_{t}_{bus}')
             ts_sof_vars[t][bus] = model.addVar(lb=0, ub=1.0, name=f'ts_sof_{t}_{bus}')  # SOF as percentage (0 to 1)
 
-            # SOF Update Constraint for each bus at each time step
-            if t_idx == 0:  # Initial time step
-                model.addConstr(
-                    ts_sof_vars[t][bus] == 0.5 + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
-                    name=f'sof_update_{t}_{bus}'
-                )
-            else:
-                # Reference the previous time step directly using t_idx - 1
-                model.addConstr(
-                    ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t_idx - 1]][bus]
-                    + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
-                    name=f'sof_update_{t}_{bus}'
-                )
     # Add power balance and load flow constraints for each time step
     for t in time_steps:
         # Power injection vector P
@@ -1490,32 +1473,26 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
             x_pu = line.x_ohm_per_km * line.length_km / ((base_voltage ** 2) / net.sn_mva)
 
             # Power flow on this line: (theta_from - theta_to) / X
-            theta_diff = theta_vars[t][from_bus] - theta_vars[t][to_bus]
-            power_flow_expr = theta_diff / x_pu
+            power_flow_expr = (theta_vars[t][from_bus] - theta_vars[t][to_bus]) / x_pu
             power_flow_mw = power_flow_expr * net.sn_mva / 1e6  # Convert to MW
 
-            # Create an auxiliary variable for the absolute value of power flow
-            abs_power_flow_mw = model.addVar(lb=0, name=f'abs_power_flow_{line.Index}_{t}')
-            model.addConstr(abs_power_flow_mw >= power_flow_mw, name=f'abs_power_flow_pos_{line.Index}_{t}')
-            model.addConstr(abs_power_flow_mw >= -power_flow_mw, name=f'abs_power_flow_neg_{line.Index}_{t}')
-
-            # Calculate the current magnitude in kA using the absolute power flow
             sqrt3 = np.sqrt(3)
-            current_mag_ka = abs_power_flow_mw / (sqrt3 * (base_voltage / 1e3))
+            current_mag_ka = power_flow_mw / (sqrt3 * (base_voltage / 1e3))
 
             # Create an auxiliary variable for the absolute value of the current magnitude
             abs_current_mag_ka = model.addVar(lb=0, name=f'abs_current_mag_ka_{line.Index}_{t}')
             model.addConstr(abs_current_mag_ka >= current_mag_ka, name=f'abs_current_mag_ka_pos_{line.Index}_{t}')
             model.addConstr(abs_current_mag_ka >= -current_mag_ka, name=f'abs_current_mag_ka_neg_{line.Index}_{t}')
 
-            # Calculate the line loading percentage
+            # Now, calculate the line loading percentage using the auxiliary variable
             if hasattr(line, 'max_i_ka'):
                 line_loading_percent = 100 * (abs_current_mag_ka / line.max_i_ka)
-                model.addConstr(line_loading_percent <= 100, name=f'line_loading_{t}_{line.Index}')
+                model.addConstr(abs_current_mag_ka <= (line.max_i_ka), 
+                            name=f'abs_current_mag_constraint_{t}_{line.Index}')
 
             # Store results for each line in the time step
             line_results[t]["line_pl_mw"][line.Index] = power_flow_mw
-            line_results[t]["line_loading_percent"][line.Index] = line_loading_percent
+            line_results[t]["line_loading_percent"][line.Index] = line_loading_percent            
             line_results[t]["line_current_mag"][line.Index] = current_mag_ka
 
         transformer_loading_results[t] = model.addVar(lb=0, ub=100, name=f'transformer_loading_{t}')
@@ -1555,7 +1532,8 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
                 bus: (
                     #(flexible_load_vars[t][bus].x if bus in flexible_load_buses else 0.0) +
                     #non_flexible_time_synchronized_loads[t][bus]  # Add non-flexible loads
-                    flexible_time_synchronized_loads[t][bus] + non_flexible_time_synchronized_loads[t][bus]
+                    #flexible_time_synchronized_loads[t][bus] + non_flexible_time_synchronized_loads[t][bus]
+                    flexible_load_vars[t][bus].x if bus in flexible_load_buses else 0.0
                 )
                 for bus in net.bus.index
             }
@@ -1572,14 +1550,14 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
                 line_results[t]["line_current_mag"][line.Index] = line_results[t]["line_current_mag"][line.Index].getValue()
 
             # After optimization, print the key variable results
-            print(f"Time Step {t}:")
-            print(f"PV Generation: {[pv_gen_vars[t][bus].x for bus in pv_buses]}")
-            print(f"External Grid Import: {ext_grid_import_vars[t].x}")
-            print(f"External Grid Export: {ext_grid_export_vars[t].x}")
-            print(f"Theta (angles): {[theta_vars[t][bus].x for bus in net.bus.index]}")
-            print(f"Thermal Storage In: {thermal_storage_results['ts_in'][t]}")
-            print(f"Thermal Storage Out: {thermal_storage_results['ts_out'][t]}")
-            print(f"Thermal Storage SOF: {thermal_storage_results['ts_sof'][t]}")
+            #print(f"Time Step {t}:")
+            #print(f"PV Generation: {[pv_gen_vars[t][bus].x for bus in pv_buses]}")
+            #print(f"External Grid Import: {ext_grid_import_vars[t].x}")
+            #print(f"External Grid Export: {ext_grid_export_vars[t].x}")
+            #print(f"Theta (angles): {[theta_vars[t][bus].x for bus in net.bus.index]}")
+            #print(f"Thermal Storage In: {thermal_storage_results['ts_in'][t]}")
+            #print(f"Thermal Storage Out: {thermal_storage_results['ts_out'][t]}")
+            #print(f"Thermal Storage SOF: {thermal_storage_results['ts_sof'][t]}")
 
             #for line in net.line.itertuples():
                 #print(f"Line {line.Index}: Power Flow MW = {line_results[t]['line_pl_mw'][line.Index]}, Loading % = {line_results[t]['line_loading_percent'][line.Index]}")

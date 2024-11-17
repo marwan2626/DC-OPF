@@ -192,8 +192,6 @@ def setup_grid_transactions(season):
     df_season_heatpump_prognosis['meanQ'] = df_season_heatpump_prognosis['meanQ'].str.replace(",", ".").astype(float)
     df_season_heatpump_prognosis['stdQ'] = df_season_heatpump_prognosis['stdQ'].str.replace(",", ".").astype(float)
     time_steps = df_season_heatpump_prognosis.index
-    # Create a DFData object for the load profile on bus 1
-    ds_load_heatpump = DFData(df_season_heatpump_prognosis[['meanP']]/par.hp_scaling)  # Convert to MW
     
     # Load the real load profile CSV
     df_heatpump = pd.read_csv("realData_winter.csv", sep=';')
@@ -314,11 +312,23 @@ def setup_grid_irep(season):
     # Set ext_grid vm_pu to 1.0
     net.ext_grid['vm_pu'] = 1.0
 
+    # Remove Sgen
+    net.sgen.drop(net.sgen.index, inplace=True)
+
+    # Load the heatpump prognosis profile CSV and filter by season
+    df_heatpump_prognosis = pd.read_csv("heatpumpPrognosis.csv", sep=';')
+    df_season_heatpump_prognosis = df_heatpump_prognosis[df_heatpump_prognosis['season'] == season]
+        
+    # Process load profile for bus 1
+    df_season_heatpump_prognosis['meanP'] = df_season_heatpump_prognosis['meanP'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['stdP'] = df_season_heatpump_prognosis['stdP'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['meanQ'] = df_season_heatpump_prognosis['meanQ'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['stdQ'] = df_season_heatpump_prognosis['stdQ'].str.replace(",", ".").astype(float)
+    time_steps = df_season_heatpump_prognosis.index
 
     # Load the normalized household profile
     df_household = pd.read_csv("realData_winter.csv", sep=';')
     df_household['P_HOUSEHOLD'] = df_household['P_HOUSEHOLD'].str.replace(",", ".").astype(float)
-    time_steps = df_household.index
     df_household['P_HOUSEHOLD_NORM'] = df_household['P_HOUSEHOLD'] / df_household['P_HOUSEHOLD'].max()
 
     household_loads = net.load[net.load['name'].str.startswith("LV4.101")]
@@ -326,7 +336,7 @@ def setup_grid_irep(season):
     
     # Create a scaled profile DataFrame
     scaled_household_profiles = pd.DataFrame(
-        df_household['P_HOUSEHOLD_NORM'].values[:, None] * household_scaling_factors,
+        df_household['P_HOUSEHOLD_NORM'].values[:, None] * household_scaling_factors / 2,
         columns=household_loads.index
     )
 
@@ -348,7 +358,7 @@ def setup_grid_irep(season):
         pp.create_load(
             net,
             bus=load.bus,  # Use the same bus as the relevant load
-            p_mw=load.p_mw*1.5,  # scale p_mw of the relevant load
+            p_mw=load.p_mw*2,  # scale p_mw of the relevant load
             q_mvar=load.q_mvar,  # Same q_mvar
             name=load.name.replace("LV4.101", "HP.101"),  # Change name prefix
             scaling=load.scaling,  # Same scaling
@@ -385,6 +395,7 @@ def setup_grid_irep(season):
     )
 
     df_heatpump['P_HEATPUMP_NORM'] = df_heatpump['P_HEATPUMP_smooth'] / df_heatpump['P_HEATPUMP_smooth'].max()
+    df_season_heatpump_prognosis['meanP_NORM'] = df_season_heatpump_prognosis['meanP'] / df_heatpump['P_HEATPUMP_smooth'].max()
 
     heatpump_scaling_factors = heatpump_loads['p_mw'].values
 
@@ -416,5 +427,139 @@ def setup_grid_irep(season):
         net.load.at[load_idx, 'controllable'] = False
 
 
-    return net, const_load_household, const_load_heatpump, time_steps, df_household, df_heatpump
+    return net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_prognosis, df_household, df_heatpump
+#return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_households
+
+
+
+def setup_grid_irep_forecast(season):
+    sb_code1 = "1-LV-semiurb4--0-no_sw"  # rural MV grid of scenario 0 with full switches
+    net = sb.get_simbench_net(sb_code1)
+    net = reorder_buses_and_update_references(net)
+    #net = reorder_lines(net)
+    line_indices = [24, 28, 23, 0, 4, 19, 11, 5, 22, 18, 6, 20, 31, 13, 17, 29, 7, 12, 16]  # List of line indices to reverse
+
+    for idx in line_indices:
+        net.line.loc[idx, ['from_bus', 'to_bus']] = net.line.loc[idx, ['to_bus', 'from_bus']].values
+
+    # Set ext_grid vm_pu to 1.0
+    net.ext_grid['vm_pu'] = 1.0
+
+    # Remove Sgen
+    net.sgen.drop(net.sgen.index, inplace=True)
+
+    # Load the heatpump prognosis profile CSV and filter by season
+    df_heatpump_prognosis = pd.read_csv("heatpumpPrognosis.csv", sep=';')
+    df_season_heatpump_prognosis = df_heatpump_prognosis[df_heatpump_prognosis['season'] == season]
+        
+    # Process load profile for bus 1
+    df_season_heatpump_prognosis['meanP'] = df_season_heatpump_prognosis['meanP'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['stdP'] = df_season_heatpump_prognosis['stdP'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['meanQ'] = df_season_heatpump_prognosis['meanQ'].str.replace(",", ".").astype(float)
+    df_season_heatpump_prognosis['stdQ'] = df_season_heatpump_prognosis['stdQ'].str.replace(",", ".").astype(float)
+    time_steps = df_season_heatpump_prognosis.index
+
+    # Load the normalized household profile
+    df_household = pd.read_csv("realData_winter.csv", sep=';')
+    df_household['P_HOUSEHOLD'] = df_household['P_HOUSEHOLD'].str.replace(",", ".").astype(float)
+    df_household['P_HOUSEHOLD_NORM'] = df_household['P_HOUSEHOLD'] / df_household['P_HOUSEHOLD'].max()
+
+    household_loads = net.load[net.load['name'].str.startswith("LV4.101")]
+    household_scaling_factors = household_loads['p_mw'].values
+    
+    # Create a scaled profile DataFrame
+    scaled_household_profiles = pd.DataFrame(
+        df_household['P_HOUSEHOLD_NORM'].values[:, None] * household_scaling_factors / 2.5,
+        columns=household_loads.index
+    )
+
+    # Convert to DFData for dynamic control
+    ds_scaled_household_profiles = DFData(scaled_household_profiles)
+
+    # Add a single ConstControl to update p_mw
+    const_load_household = ConstControl(
+        net,
+        element="load",
+        variable="p_mw",  # Update p_mw directly
+        element_index=household_loads.index,  # Apply to all loads
+        profile_name=scaled_household_profiles.columns.tolist(),  # Profile for each load
+        data_source=ds_scaled_household_profiles
+    )
+
+    for load in household_loads.itertuples():
+    # Create a new load with modified parameters
+        pp.create_load(
+            net,
+            bus=load.bus,  # Use the same bus as the relevant load
+            p_mw=load.p_mw*1.4,  # scale p_mw of the relevant load
+            q_mvar=load.q_mvar,  # Same q_mvar
+            name=load.name.replace("LV4.101", "HP.101"),  # Change name prefix
+            scaling=load.scaling,  # Same scaling
+            const_z_percent=load.const_z_percent,  # Same const_z_percent
+            const_i_percent=load.const_i_percent,  # Same const_i_percent
+            voltLvl=load.voltLvl,  # Same voltLvl
+            sn_mva=load.sn_mva,  # Same sn_mva
+            subnet=load.subnet  # Same subnet
+        )
+    
+    heatpump_loads = net.load[net.load['name'].str.startswith("HP.101")]
+    # Load the real load profile CSV
+    df_heatpump = pd.read_csv("realData_winter.csv", sep=';')
+        
+    # Process load profile for bus 1
+    df_heatpump['P_HEATPUMP'] = df_heatpump['P_HEATPUMP'].str.replace(",", ".").astype(float)
+    time_steps = df_heatpump.index
+    threshold = 0.5  # Z-score threshold for identifying outliers
+    mean = df_heatpump['P_HEATPUMP'].mean()
+    std = df_heatpump['P_HEATPUMP'].std()
+    z_scores = (df_heatpump['P_HEATPUMP'] - mean) / std
+    # Replace outliers with a rolling average (smoothing) or cap them
+    df_heatpump['P_HEATPUMP_smooth'] = np.where(
+        abs(z_scores) > threshold,
+        df_heatpump['P_HEATPUMP'].rolling(window=5, min_periods=1, center=True).mean(),
+        df_heatpump['P_HEATPUMP']
+    )
+
+    # Replace outliers with a rolling average (smoothing) or cap them
+    df_heatpump['P_HEATPUMP_smooth'] = np.where(
+        abs(z_scores) > threshold,
+        df_heatpump['P_HEATPUMP'].rolling(window=4, min_periods=1, center=True).mean(),
+        df_heatpump['P_HEATPUMP']
+    )
+
+    df_heatpump['P_HEATPUMP_NORM'] = df_heatpump['P_HEATPUMP_smooth'] / df_heatpump['P_HEATPUMP_smooth'].max()
+    df_season_heatpump_prognosis['meanP_NORM'] = df_season_heatpump_prognosis['meanP'] / df_season_heatpump_prognosis['meanP'].max()
+    df_season_heatpump_prognosis['p_mw'] = df_season_heatpump_prognosis['meanP_NORM']
+
+    heatpump_scaling_factors = heatpump_loads['p_mw'].values
+
+    # Create a scaled heatpump profile DataFrame
+    df_season_heatpump_prognosis_scaled = pd.DataFrame(
+        df_season_heatpump_prognosis['p_mw'].values[:, None] * heatpump_scaling_factors,
+        columns=heatpump_loads.index
+    )
+
+    # Convert to DFData for dynamic control
+    ds_scaled_heatpump_profiles = DFData(df_season_heatpump_prognosis_scaled)
+
+    # Add a single ConstControl to update p_mw
+    const_load_heatpump = ConstControl(
+        net,
+        element="load",
+        variable="p_mw",  # Update p_mw directly
+        element_index=heatpump_loads.index,  # Apply to all loads
+        profile_name=df_season_heatpump_prognosis_scaled.columns.tolist(),  # Profile for each load
+        data_source=ds_scaled_heatpump_profiles
+    )
+
+    
+    # Iterate over all loads in the network and set controllable to False (i.e. not flexible)
+    for load_idx in heatpump_loads.index:
+        net.load.at[load_idx, 'controllable'] = True
+
+    for load_idx in household_loads.index:
+        net.load.at[load_idx, 'controllable'] = False
+
+
+    return net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_prognosis, df_household, df_heatpump
 #return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_households

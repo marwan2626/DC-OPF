@@ -23,7 +23,7 @@ import parameters as par
 
 def extract_line_currents(line_results, time_step):
     # Extracts the current magnitude for all lines at a given time_step
-    return {line: line_results[time_step]['line_loading_percent'][line] for line in line_results[time_step]['line_loading_percent'].keys()}
+    return {line: line_results[time_step]['line_current_mag'][line] for line in line_results[time_step]['line_current_mag'].keys()}
 
 ###############################################################################
 ## DRCC-OPF FUNCTIONS ##
@@ -57,7 +57,7 @@ def calculate_sensitivity(heatpumpForecast, heatpumpReal, opf_results, time_step
     # Iterate over each timestep to calculate sensitivity
     for t in range(1, len(time_steps)):
         # Calculate forecasting error ω for current and previous timestep
-        w_t = float(heatpumpReal['P_HEATPUMP'].iloc[t] - heatpumpForecast['meanP'].iloc[t])
+        w_t = float(heatpumpReal['P_HEATPUMP_NORM'].iloc[t] - heatpumpForecast['meanP_NORM'].iloc[t])
 
         # Get current line currents from OPF results
         line_currents_t = extract_line_currents(opf_results['line_results'], time_steps[t])
@@ -80,7 +80,7 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
     Omega_I_new = {t: {line: 0 for line in Omega_I[t]} for t in Omega_I}
     
     # Compute scaling factor
-    scaling_factor = np.sqrt((1 - alpha) / alpha)
+    scaling_factor = np.sqrt((1 - alpha) / (alpha))
 
     # Compute the square root of the covariance matrix
     cov_sqrt = np.sqrt(cov_matrix)
@@ -92,7 +92,7 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
             scaled_sensitivity = sensitivity_value * cov_sqrt
 
             # Calculate the L2 norm of the scaled sensitivity vector
-            Omega_I_new[t][line] = scaling_factor * np.linalg.norm(scaled_sensitivity)
+            Omega_I_new[t][line] = scaling_factor * np.linalg.norm(scaled_sensitivity) *1e-3 #kA
 
     return Omega_I_new
 
@@ -148,26 +148,44 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
     }
 
     # Temporary dictionary to store updated load values per time step
-    time_synchronized_loads = {t: {} for t in time_steps}
+    flexible_time_synchronized_loads = {t: {} for t in time_steps}
+    non_flexible_time_synchronized_loads = {t: {} for t in time_steps}
 
     # Identify buses with flexible loads
-    flexible_load_buses = net.load[net.load['controllable'] == True].bus.values
-    print(f"Flexible load buses: {flexible_load_buses}")
+    flexible_load_buses = list(set(net.load[net.load['controllable'] == True].bus.values))
+    non_flexible_load_buses = list(set(net.load[net.load['controllable'] == False].bus.values))
+    #print(f"Flexible load buses: {flexible_load_buses}")
+
     # Add variables for each time step
     for t in time_steps:
         # Update const_pv and const_load for this time step
         const_load_heatpump.time_step(net, time=t)
         const_load_household.time_step(net, time=t)
 
-        # Extract the time-synchronized load for each bus
-        # Ensure all buses have an entry in `time_synchronized_loads` for the given time step
-        for bus in net.bus.index:
-            if bus in net.load.bus.values:
-                # If the bus has a load, store its value
-                time_synchronized_loads[t][bus] = net.load.loc[net.load.bus == bus, 'p_mw'].values[0]
+        # Initialize dictionaries for time-synchronized loads
+        flexible_time_synchronized_loads[t] = {}
+        non_flexible_time_synchronized_loads[t] = {}
+
+        # Iterate over all loads
+        for load in net.load.itertuples():
+            bus = load.bus
+            if load.controllable:
+                # Flexible load
+                flexible_time_synchronized_loads[t][bus] = (
+                    flexible_time_synchronized_loads[t].get(bus, 0.0) + load.p_mw
+                )
             else:
-                # For buses without loads, set to zero or a default value
-                time_synchronized_loads[t][bus] = 0.0
+                # Non-flexible load
+                non_flexible_time_synchronized_loads[t][bus] = (
+                    non_flexible_time_synchronized_loads[t].get(bus, 0.0) + load.p_mw
+                )
+
+        # Ensure all buses have an entry, even if no loads are connected
+        for bus in net.bus.index:
+            if bus not in flexible_time_synchronized_loads[t]:
+                flexible_time_synchronized_loads[t][bus] = 0.0
+            if bus not in non_flexible_time_synchronized_loads[t]:
+                non_flexible_time_synchronized_loads[t][bus] = 0.0
 
         # Extract the bus indices where PV generators are connected (from net.sgen.bus)
         pv_buses = net.sgen.bus.values
@@ -213,25 +231,11 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
 
     # Add thermal storage variables      
     # Update SOF constraints for each flexible load bus
-    for t_idx, t in enumerate(time_steps):
+    for t_idx,  t in enumerate(time_steps):
         for bus in flexible_load_buses:
             ts_in_vars[t][bus] = model.addVar(lb=0, ub=par.ts_in_max, name=f'ts_in_{t}_{bus}')
             ts_out_vars[t][bus] = model.addVar(lb=0, ub=par.ts_out_max, name=f'ts_out_{t}_{bus}')
             ts_sof_vars[t][bus] = model.addVar(lb=0, ub=1.0, name=f'ts_sof_{t}_{bus}')  # SOF as percentage (0 to 1)
-
-            # SOF Update Constraint for each bus at each time step
-            if t_idx == 0:  # Initial time step
-                model.addConstr(
-                    ts_sof_vars[t][bus] == 0.5 + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
-                    name=f'sof_update_{t}_{bus}'
-                )
-            else:
-                # Reference the previous time step directly using t_idx - 1
-                model.addConstr(
-                    ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t_idx - 1]][bus]
-                    + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
-                    name=f'sof_update_{t}_{bus}'
-                )
 
     # Add power balance and load flow constraints for each time step
     for t in time_steps:
@@ -242,7 +246,7 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             if bus in net.load.bus.values:
                 if bus in flexible_load_buses:
                     # Define the heat demand for the bus, representing the electrical equivalent
-                    heat_demand = time_synchronized_loads[t][bus]  # or load profile representing heat demand
+                    heat_demand = flexible_time_synchronized_loads[t][bus]  # or load profile representing heat demand
 
                     # 1. Heat Demand Coverage: flexible_load_vars and/or thermal storage must meet the demand
                     model.addConstr(
@@ -277,9 +281,10 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
 
                     # Use the flexible load variable for controllable loads
                     P_injected[bus] -= flexible_load_vars[t][bus]
-                else:
+
+                if bus in non_flexible_load_buses:
                     # For non-flexible loads, use the time-synchronized load
-                    P_injected[bus] -= time_synchronized_loads[t][bus]
+                    P_injected[bus] -= non_flexible_time_synchronized_loads[t][bus]
 
             if len(pv_buses) > 0 and bus in pv_buses:
                 if bus in pv_buses:
@@ -395,8 +400,12 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             transformer_loading_results[t] = transformer_loading_results[t].x
             
             load_results[t] = {
-                bus: flexible_load_vars[t][bus].x if bus in flexible_load_buses else 
-                time_synchronized_loads[t][bus]
+                bus: (
+                    #(flexible_load_vars[t][bus].x if bus in flexible_load_buses else 0.0) +
+                    #non_flexible_time_synchronized_loads[t][bus]  # Add non-flexible loads
+                    #flexible_time_synchronized_loads[t][bus] + non_flexible_time_synchronized_loads[t][bus]
+                    flexible_load_vars[t][bus].x if bus in flexible_load_buses else 0.0
+                )
                 for bus in net.bus.index
             }
 
@@ -463,8 +472,8 @@ def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, h
         # Apply threshold limit to Omega_I
         for t in Omega_I:
             for line in Omega_I[t]:
-                if Omega_I[t][line] >= 0.7:
-                    Omega_I[t][line] = 0.69
+                if Omega_I[t][line] >= 0.1:
+                    Omega_I[t][line] = 0.1
 
         print(f"Omega_I calculated for DRCC iteration {drcc_iter + 1}")
         # for t in Omega_I:
@@ -493,6 +502,109 @@ def drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, h
         # Update Omega_I_prev and previous_max_diff for next iteration
         Omega_I_prev = copy.deepcopy(Omega_I)
         previous_max_diff = max_diff
+
+        # Re-run OPF with the updated Omega_I
+        drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I)
+        
+        if drcc_opf_results is None:
+            print(f"OPF infeasible in DRCC iteration {drcc_iter + 1}")
+            return None
+
+    return drcc_opf_results
+
+
+import griddata as gd
+
+### calculate the sensitivity ###
+def calculate_sensitivity2(heatpumpForecast, heatpumpReal, opf_results, previous_opf_results, time_steps):
+    # Check if 'line_results' exists in opf_results
+    if 'line_results' not in opf_results:
+        raise KeyError("'line_results' key missing from opf_results. Ensure solve_opf populates it correctly.")
+    
+    sensitivity_results = {t: {} for t in time_steps}
+    
+    for t in time_steps:
+        # Calculate forecasting error ω for current and previous timestep
+        w_t = float(heatpumpReal['P_HEATPUMP_NORM'].iloc[t] - heatpumpForecast['meanP_NORM'].iloc[t])
+
+        current_line_currents = extract_line_currents(opf_results['line_results'], t)
+        previous_line_currents = extract_line_currents(previous_opf_results['line_results'], t)
+        
+        # Calculate sensitivity for each line relative to the previous timestep
+        for line in previous_line_currents.keys():
+            sensitivity_value = (current_line_currents[line] - previous_line_currents[line]) / (w_t)
+            sensitivity_results[time_steps[t]][line] = float(sensitivity_value)
+    
+    return sensitivity_results
+
+def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, heatpumpForecast, heatpumpReal, max_iter_drcc, alpha, eta):
+    # Step 1: Initialize covariance matrix
+    season = 'winter'
+    net_forecast, const_load_household_fc, const_load_heatpump_fc, time_steps_fc, df_season_heatpump_prognosis, df_household, df_heatpump = gd.setup_grid_irep_forecast(season)
+
+    Omega_I_init = {t: {line.Index: 0 for line in net.line.itertuples()} for t in time_steps}
+    print("Initializing Omega_I = 0")
+    print("Solving forecast OPF")
+    initial_results = solve_opf(net_forecast, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I_init)
+    print("Solving Initial OPF with Omega_I = 0")
+    drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I_init)
+    #calcualte sensitivity from forecast & real data
+    sensitivity = calculate_sensitivity2(heatpumpForecast, heatpumpReal, drcc_opf_results, initial_results, time_steps)
+    print(f"Initial Sensitivity calculated")
+    cov_matrix = calculate_covariance_matrix(heatpumpForecast)
+    print(f"Covariance Matric Calculated")
+    Omega_I_prev = Omega_I_init
+    previous_max_diff = None
+    if drcc_opf_results is None:
+        print("Initial OPF failed with Omega_I = 0")
+        return None
+
+    for drcc_iter in range(max_iter_drcc):
+        print(f"Starting DRCC iteration {drcc_iter + 1}")
+
+        # Step 4: Calculate Omega_I using the updated sensitivity and covariance matrix
+        Omega_I = calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I_prev)
+        #Apply threshold limit to Omega_I
+        for t in Omega_I:
+            for line in Omega_I[t]:
+                if Omega_I[t][line] >= 0.2:
+                    Omega_I[t][line] = 0.2
+
+        print(f"Omega_I calculated for DRCC iteration {drcc_iter + 1}")
+        # for t in Omega_I:
+        #     omega_values = list(Omega_I[t].values())
+        #     print(f"Timestep {t}: Omega_I min={min(omega_values)}, max={max(omega_values)}, mean={np.mean(omega_values)}")
+
+        max_diff = 0
+        max_diff_timestep = None
+        max_diff_line = None
+        for t in time_steps:
+            for line in Omega_I[t].keys():
+                diff = np.abs(Omega_I[t][line] - Omega_I_prev[t][line])
+                if diff > max_diff:
+                    max_diff = diff
+                    max_diff_timestep = t
+                    max_diff_line = line
+
+        # Print the max difference and the location details
+        print(f"DRCC Iteration {drcc_iter + 1}: Max Omega_I difference = {max_diff} at Timestep {max_diff_timestep}, Line {max_diff_line}")
+
+        # Check convergence based on change in max_diff between consecutive iterations
+        if previous_max_diff is not None and abs(max_diff - previous_max_diff) < eta:
+            print(f"Converged in {drcc_iter + 1} DRCC iterations based on max difference convergence.")
+            break
+
+        if previous_max_diff  is not None and previous_max_diff == 0:
+            print(f"Converged in {drcc_iter + 1} DRCC iterations based on max difference convergence.")
+            break
+
+        # Step 3: Calculate sensitivity based on the latest OPF results
+        sensitivity = calculate_sensitivity(heatpumpForecast, heatpumpReal, drcc_opf_results, time_steps)
+        print(f"Sensitivity calculated for DRCC iteration {drcc_iter + 1}")
+
+        # Update Omega_I_prev and previous_max_diff for next iteration
+        Omega_I_prev = copy.deepcopy(Omega_I)
+        previous_max_diff = copy.deepcopy(max_diff)
 
         # Re-run OPF with the updated Omega_I
         drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, Omega_I)
