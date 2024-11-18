@@ -626,10 +626,6 @@ def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             print(f"Converged in {drcc_iter + 1} DRCC iterations based on max difference convergence.")
             break
 
-        # Step 3: Calculate sensitivity based on the latest OPF results
-        sensitivity = calculate_sensitivity2(heatpumpForecast, heatpumpReal, drcc_opf_results, initial_results, time_steps)
-        print(f"Sensitivity calculated for DRCC iteration {drcc_iter + 1}")
-
         # Update Omega_I_prev and previous_max_diff for next iteration
         Omega_I_prev = copy.deepcopy(Omega_I)
         previous_max_diff = copy.deepcopy(max_diff)
@@ -637,6 +633,10 @@ def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
         # Re-run OPF with the updated Omega_I
         drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors, Bbus, Omega_I)
         
+        #Calculate sensitivity based on the latest OPF results
+        sensitivity = calculate_sensitivity2(heatpumpForecast, heatpumpReal, drcc_opf_results, initial_results, time_steps)
+        print(f"Sensitivity calculated for DRCC iteration {drcc_iter + 1}")
+
         if drcc_opf_results is None:
             print(f"OPF infeasible in DRCC iteration {drcc_iter + 1}")
             return None
