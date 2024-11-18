@@ -1226,14 +1226,14 @@ def solve_opf5(net, time_steps, const_load_heatpump, const_load_household, Bbus)
 #here?
 
 # Function to solve OPF problem over a time series
-def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus):
+def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors, Bbus):
     model = gp.Model("opf_with_dc_load_flow")
 
     # Define the costs for import and export
-    import_cost = 100  # €/MW for importing power from the external grid
-    export_cost = 80  # €/MW for exporting power to the external grid
-    curtailment_cost = 150  # €/MW for curtailing PV (set higher than import/export costs)
-    flexibility_cost = 120  # €/MW for reducing load at bus 1
+    import_cost = par.import_cost 
+    export_cost = par.export_cost  
+    curtailment_cost = par.curtailment_cost  
+    flexibility_cost = par.flexibility_cost  
 
     epsilon = 100e-9  # Small positive value to ensure some external grid usage
 
@@ -1357,7 +1357,15 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
             name=f'flexible_load_{t}'
         )
                             
-    # Add thermal storage variables      
+    # Create a dictionary mapping bus indices to scaling factors
+    heatpump_scaling_factors_dict = {
+        bus: heatpump_scaling_factors[idx] for idx, bus in enumerate(flexible_load_buses)
+    }
+    
+    # Add thermal storage variables 
+    ts_size_mwh_scaled_dict = {
+        bus: par.ts_size_mwh * heatpump_scaling_factors_dict[bus] for bus in flexible_load_buses
+    }     
     # Update SOF constraints for each flexible load bus
     for t_idx, t in enumerate(time_steps):
         for bus in flexible_load_buses:
@@ -1403,7 +1411,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
                     else:
                         # Update SOF based on the previous timestep
                         model.addConstr(
-                            ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t - 1]][bus] + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / par.ts_size_mwh,
+                            ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t - 1]][bus] + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / ts_size_mwh_scaled_dict[bus],
                             name=f'storage_state_update_{t}_{bus}'
                         )
 
@@ -1512,6 +1520,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
     model.setObjective(total_cost, GRB.MINIMIZE)
 
     # After adding all constraints and variables
+    model.setParam('OutputFlag', 0)
     model.setParam('Presolve', 0)
     model.update()
 
@@ -1520,6 +1529,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, Bbus)
 
     # Check if optimization was successful
     if model.status == gp.GRB.OPTIMAL:
+        print(f"Optimal Objective Value: {model.ObjVal}")
         # Extract optimized values for PV generation, external grid power, loads, and theta
         for t in time_steps:
             pv_gen_results[t] = {bus: pv_gen_vars[t][bus].x for bus in pv_buses}
