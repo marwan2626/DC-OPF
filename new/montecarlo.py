@@ -169,10 +169,9 @@ def run_single_sample_with_violation(
                 ts_out_value = ts_out[t][bus]
                 ts_in_value = ts_in[t][bus]
                 adjusted_load = nominal_heat_demand + (sampled_heat_demand - nominal_heat_demand)
-                adjusted_load += (ts_in_value - ts_out_value) / par.COP
 
                 # Update the load in the network
-                net.load.at[load_index, 'p_mw'] = adjusted_load
+                net.load.at[load_index, 'p_mw'] = adjusted_load 
 
             except Exception as e:
                 print(f"Error updating load_index {load_index}, bus {bus} at time {t}: {e}")

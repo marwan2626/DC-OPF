@@ -35,9 +35,13 @@ def calculate_covariance_matrix(heatpumpForecast):
     # Ensure 'sigma P' is present in the DataFrame
     if 'stdP' not in heatpumpForecast.columns:
         raise ValueError("DataFrame must contain 'stdP' for standard deviation values.")
+    
+    max_mean = heatpumpForecast['meanP'].max()
+    heatpumpForecast['meanP_norm'] = heatpumpForecast['meanP'] / max_mean
+    heatpumpForecast['stdP_norm'] = heatpumpForecast['stdP'] / max_mean
 
     # Extract the 'stdP' values and square them to get the variance
-    variance = (heatpumpForecast['stdP']/par.hp_scaling) ** 2
+    variance = (heatpumpForecast['stdP_norm']) ** 2
 
     # Create a diagonal covariance matrix from the variance
     covariance_matrix = np.diag(variance)
@@ -58,14 +62,14 @@ def calculate_sensitivity(heatpumpForecast, heatpumpReal, opf_results, time_step
     # Iterate over each timestep to calculate sensitivity
     for t in range(1, len(time_steps)):
         # Calculate forecasting error ω for current and previous timestep
-        w_t = float(heatpumpReal['P_HEATPUMP_NORM'].iloc[t] - heatpumpForecast['meanP_NORM'].iloc[t])
+        w_t = float((abs(heatpumpReal['P_HEATPUMP_NORM'].iloc[t] - heatpumpForecast['meanP_NORM'].iloc[t]))/heatpumpReal['P_HEATPUMP_NORM'].iloc[t])
 
         # Get current line currents from OPF results
         line_currents_t = extract_line_currents(opf_results['line_results'], time_steps[t])
 
         # Calculate sensitivity for each line relative to the previous timestep
         for line in line_currents_prev.keys():
-            sensitivity_value = (line_currents_t[line] - line_currents_prev[line]) / (w_t)
+            sensitivity_value = (line_currents_t[line] - line_currents_prev[line]) / ((w_t))
             sensitivity_results[time_steps[t]][line] = float(sensitivity_value)
 
         # Update `line_currents_prev` to the current timestep’s line currents
@@ -81,7 +85,7 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
     Omega_I_new = {t: {line: 0 for line in Omega_I[t]} for t in Omega_I}
     
     # Compute scaling factor
-    scaling_factor = np.sqrt((1 - alpha) / (alpha))
+    scaling_factor = np.sqrt((1 - alpha) / (alpha)) *2.576 # 99% confidence interval
 
     # Compute the square root of the covariance matrix
     cov_sqrt = np.sqrt(cov_matrix)
@@ -90,10 +94,10 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
     for t, sensitivity_t in sensitivity.items():
         for line, sensitivity_value in sensitivity_t.items():
             # Scale each sensitivity value with the square root of the covariance matrix
-            scaled_sensitivity = sensitivity_value * cov_sqrt
+            scaled_sensitivity = sensitivity_value * cov_sqrt 
 
             # Calculate the L2 norm of the scaled sensitivity vector
-            Omega_I_new[t][line] = scaling_factor * np.linalg.norm(scaled_sensitivity) *1e-3 #kA
+            Omega_I_new[t][line] = scaling_factor * np.linalg.norm(scaled_sensitivity) * 1e-3 #kA
 
     return Omega_I_new
 
@@ -234,7 +238,7 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpu
     heatpump_scaling_factors_dict = {
         bus: heatpump_scaling_factors_df.loc[heatpump_scaling_factors_df['bus'] == bus, 'p_mw'].values[0]
         for bus in flexible_load_buses
-}
+    }
     
     # Add thermal storage variables
     ts_size_mwh_scaled_dict = {

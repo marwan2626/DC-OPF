@@ -1366,7 +1366,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
     heatpump_scaling_factors_dict = {
         bus: heatpump_scaling_factors_df.loc[heatpump_scaling_factors_df['bus'] == bus, 'p_mw'].values[0]
         for bus in flexible_load_buses
-}
+    }
     
     # Add thermal storage variables
     ts_size_mwh_scaled_dict = {
