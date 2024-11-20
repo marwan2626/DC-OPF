@@ -11,11 +11,16 @@ OPF File
 #### PACKAGES ####
 import gurobipy as gp
 from gurobipy import GRB
-import pandas as pd
 import numpy as np
+
 
 #### SCRIPTS ####
 import parameters as par
+import results as rs
+
+###############################################################################
+## OPTIMIZATION FUNCTION ## 
+###############################################################################
 
 # Function to solve OPF problem over a time series
 def solve_opf2(net, time_steps, const_pv, const_load, Bbus):
@@ -1226,7 +1231,7 @@ def solve_opf5(net, time_steps, const_load_heatpump, const_load_household, Bbus)
 #here?
 
 # Function to solve OPF problem over a time series
-def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors, Bbus):
+def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors_df, Bbus):
     model = gp.Model("opf_with_dc_load_flow")
 
     # Define the costs for import and export
@@ -1357,12 +1362,13 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
             name=f'flexible_load_{t}'
         )
                             
-    # Create a dictionary mapping bus indices to scaling factors
+    # Create a dictionary mapping bus indices to scaling factors using heatpump_scaling_factors_df
     heatpump_scaling_factors_dict = {
-        bus: heatpump_scaling_factors[idx] for idx, bus in enumerate(flexible_load_buses)
-    }
+        bus: heatpump_scaling_factors_df.loc[heatpump_scaling_factors_df['bus'] == bus, 'p_mw'].values[0]
+        for bus in flexible_load_buses
+}
     
-    # Add thermal storage variables 
+    # Add thermal storage variables
     ts_size_mwh_scaled_dict = {
         bus: par.ts_size_mwh * heatpump_scaling_factors_dict[bus] for bus in flexible_load_buses
     }     
@@ -1584,6 +1590,10 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
             'transformer_loading': transformer_loading_results,
             'thermal_storage': thermal_storage_results  #  thermal storage results
         }
+
+        # Save the results to a file
+        if results is not None:
+            rs.save_optim_results(results, "opf_results.pkl")
         
         return results
     
@@ -1596,3 +1606,4 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
     else:
         print(f"Optimization failed with status: {model.status}")
         return None
+    

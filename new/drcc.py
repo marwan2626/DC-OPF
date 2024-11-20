@@ -11,12 +11,13 @@ DRCC-OPF File
 #### PACKAGES ####
 import gurobipy as gp
 from gurobipy import GRB
-import pandas as pd
+import pickle as pkl
 import numpy as np
 import copy
 
 #### SCRIPTS ####
 import parameters as par 
+import results as rs
 ###############################################################################
 ## AUXILIARY FUNCTIONS ##
 ###############################################################################
@@ -640,5 +641,10 @@ def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
         if drcc_opf_results is None:
             print(f"OPF infeasible in DRCC iteration {drcc_iter + 1}")
             return None
+
+    # Save the results to a file
+    if drcc_opf_results is not None:
+        rs.save_optim_results(drcc_opf_results, "drcc_opf_results.pkl")
+
 
     return drcc_opf_results

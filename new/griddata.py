@@ -397,14 +397,20 @@ def setup_grid_irep(season):
     df_heatpump['P_HEATPUMP_NORM'] = df_heatpump['P_HEATPUMP_smooth'] / df_heatpump['P_HEATPUMP_smooth'].max()
     df_season_heatpump_prognosis['meanP_NORM'] = df_season_heatpump_prognosis['meanP'] / df_heatpump['P_HEATPUMP_smooth'].max()
 
-    heatpump_scaling_factors = heatpump_loads['p_mw'].values
+    # Generate heatpump scaling factors DataFrame
+    heatpump_scaling_factors_df = pd.DataFrame({
+        'load_idx': heatpump_loads.index,
+        'p_mw': heatpump_loads['p_mw'].values,
+        'bus': heatpump_loads['bus'].values
+    }).set_index('load_idx')
     
 
     # Create a scaled heatpump profile DataFrame
     scaled_heatpump_profiles = pd.DataFrame(
-        df_heatpump['P_HEATPUMP_NORM'].values[:, None] * heatpump_scaling_factors,
+        df_heatpump['P_HEATPUMP_NORM'].values[:, None] * heatpump_scaling_factors_df['p_mw'].values,
         columns=heatpump_loads.index
     )
+
 
     # Convert to DFData for dynamic control
     ds_scaled_heatpump_profiles = DFData(scaled_heatpump_profiles)
@@ -428,7 +434,7 @@ def setup_grid_irep(season):
         net.load.at[load_idx, 'controllable'] = False
 
 
-    return net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_prognosis, df_household, df_heatpump, heatpump_scaling_factors
+    return net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_prognosis, df_household, df_heatpump, heatpump_scaling_factors_df
 #return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_households
 
 

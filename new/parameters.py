@@ -60,7 +60,7 @@ K_MAX = 5 # maximum inner lf iterations
 
 
 ### FORECAST ###
-N_MC = 1000 # number of samples for monte-carlo simulation
+N_MC = 20 # number of samples for monte-carlo simulation
 
 
 ###############################################################################

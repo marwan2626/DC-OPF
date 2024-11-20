@@ -11,6 +11,7 @@ Results File
 #### PACKAGES ####
 import ast
 import pandas as pd 
+import pickle as pkl
 
 #### SCRIPTS ####
 import parameters as par
@@ -59,3 +60,25 @@ def curtailment_calculation(results, load_profile):
         curtailment_factor.append(curtailment)
 
     return curtailment_factor
+
+
+def save_optim_results(results, filename):
+    try:
+        with open(filename, 'wb') as file:
+            pkl.dump(results, file)
+        print(f"Results successfully saved to {filename}")
+    except Exception as e:
+        print(f"An error occurred while saving the results: {e}")
+
+def load_optim_results(filename):
+    try:
+        with open(filename, 'rb') as file:
+            drcc_opf_results = pkl.load(file)
+        print(f"DRCC OPF results loaded successfully from {filename}.")
+        return drcc_opf_results
+    except FileNotFoundError:
+        print(f"Error: File {filename} not found.")
+        return None
+    except pkl.UnpicklingError:
+        print(f"Error: Unable to load the file {filename}. It may not be a valid pickle file.")
+        return None
