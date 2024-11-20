@@ -35,22 +35,24 @@ def generate_samples(df_season_heatpump_prognosis):
     # Extract mean and std deviation as numpy arrays for efficient computation
     meanP = df_season_heatpump_prognosis['meanP_norm'].values
     stdP = df_season_heatpump_prognosis['stdP_norm'].values
-    
+    timesteps = df_season_heatpump_prognosis.index
    
-    # Validate inputs
-    if np.any(stdP < 0):
-        raise ValueError("Standard deviation (stdP) cannot be negative.")
-    if np.any(stdP > 10 * meanP):
-        print("Warning: stdP is very large relative to meanP for some timesteps.")
+    # Generate samples as a 2D NumPy array
+    samples = np.random.normal(
+        loc=meanP,                     # Mean for each timestep
+        scale=stdP,                    # Std deviation for each timestep
+        size=(n_samples, len(meanP))   # Shape: (n_samples, n_timesteps)
+    )
 
-    # Generate random samples (n_samples x n_timesteps)
-    mc_samples = np.empty((n_samples, len(meanP)))  # Preallocate array
+    # Convert each sample to a DataFrame to mimic the old format
+    sample_profiles = []
+    for i in range(n_samples):
+        df_sample = pd.DataFrame({
+            'P_HEATPUMP_NORM': samples[i]
+        }, index=timesteps)  # Use the same index as the input DataFrame
+        sample_profiles.append(df_sample)
 
-    for t in range(len(meanP)):
-        # Generate samples for timestep `t` with specified mean and std deviation
-        mc_samples[:, t] = np.random.normal(loc=meanP[t], scale=stdP[t], size=n_samples)
-
-    return mc_samples
+    return sample_profiles
 
 
 
@@ -160,7 +162,7 @@ def run_single_sample_with_violation(
 
             try:
                 # Map Monte Carlo sample to heat pump load
-                sampled_heat_demand = sample_profile['P_HEATPUMP_NORM'].loc[t] * scaling_factor
+                sampled_heat_demand = sample_profile.loc[t] * scaling_factor
 
                 # Compute adjusted load
                 nominal_heat_demand = flexible_load_vars[t][bus]
@@ -296,10 +298,23 @@ def montecarlo_analysis_with_violations(
         f.write("\nMaximum Violations:\n")
         f.write(f"Line {max_violations_line[0]}, Time Step {max_violations_line[1]}: {max_violations_line[2]} violations\n")
 
+
+    # Calculate the number of simulations with at least one violation
+    num_simulations_with_violations = sum(1 for count in violation_counts if count > 0)
+
+    # Get total constraints checked
+    num_line_constraints = len(net.line)  # Total number of lines
+    num_trafo_constraints = len(net.trafo)  # Total number of transformers
+    number_of_constraints = num_line_constraints + num_trafo_constraints
     # Calculate probability of constraint violation
     total_violations = sum(violation_counts)
-    total_simulations = len(mc_samples) * len(time_steps)
-    violation_probability = total_violations / total_simulations
+    # Calculate total number of constraints checked
+    total_constraints = len(mc_samples) * len(time_steps) * number_of_constraints
+    # Calculate the probability of a single constraint being violated
+    violation_probability = total_violations / total_constraints
+
+    violation_probability_samples = num_simulations_with_violations / len(mc_samples)
+
     total_time = time.time() - start_time
 
     print(f"Monte Carlo analysis completed for {len(mc_samples)} samples in parallel.")
