@@ -24,28 +24,36 @@ import parameters as par
 ## Generate Samples ##
 ###############################################################################
 
-def generate_samples(df_season_heatpump_prognosis):
-    # Convert meanP and stdP to float after replacing commas    
-    n_samples = par.N_MC
-    mc_samples = []
-    
-    for i in range(n_samples):
-        # Create a copy of the original DataFrame structure, excluding stdP
-        df_sample = df_season_heatpump_prognosis[['Unnamed: 0', 'meanP']].copy()
-        
-        # Generate samples for meanP using stdP as the scale (std deviation)
-        df_sample['meanP'] = np.random.normal(loc=df_sample['meanP'], scale=df_season_heatpump_prognosis['stdP'])
 
-        # Ensure that the meanP values are scaled correctly
-        df_sample['P_HEATPUMP_NORM'] = df_sample['meanP'] / df_sample['meanP'].max()
-        
-        # Append to the list
-        mc_samples.append(df_sample)
+def generate_samples(df_season_heatpump_prognosis):
+
+    max_mean = df_season_heatpump_prognosis['meanP'].max()
+    df_season_heatpump_prognosis['meanP_norm'] = df_season_heatpump_prognosis['meanP'] / max_mean
+    df_season_heatpump_prognosis['stdP_norm'] = df_season_heatpump_prognosis['stdP'] / max_mean
     
-    # Print the header of the first sample for inspection
-    print("Header of first sample:\n", mc_samples[0].head())
+    n_samples = par.N_MC
+    # Extract mean and std deviation as numpy arrays for efficient computation
+    meanP = df_season_heatpump_prognosis['meanP_norm'].values
+    stdP = df_season_heatpump_prognosis['stdP_norm'].values
     
+   
+    # Validate inputs
+    if np.any(stdP < 0):
+        raise ValueError("Standard deviation (stdP) cannot be negative.")
+    if np.any(stdP > 10 * meanP):
+        print("Warning: stdP is very large relative to meanP for some timesteps.")
+
+    # Generate random samples (n_samples x n_timesteps)
+    mc_samples = np.empty((n_samples, len(meanP)))  # Preallocate array
+
+    for t in range(len(meanP)):
+        # Generate samples for timestep `t` with specified mean and std deviation
+        mc_samples[:, t] = np.random.normal(loc=meanP[t], scale=stdP[t], size=n_samples)
+
     return mc_samples
+
+
+
 
 ###############################################################################
 ## PANDAPOWER FUNCTIONS ##
@@ -159,7 +167,7 @@ def run_single_sample_with_violation(
                 ts_out_value = ts_out[t][bus]
                 ts_in_value = ts_in[t][bus]
                 adjusted_load = nominal_heat_demand + (sampled_heat_demand - nominal_heat_demand)
-                adjusted_load -= (ts_out_value + ts_in_value) / par.COP
+                adjusted_load += (ts_in_value - ts_out_value) / par.COP
 
                 # Update the load in the network
                 net.load.at[load_index, 'p_mw'] = adjusted_load

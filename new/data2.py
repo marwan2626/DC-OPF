@@ -18,7 +18,7 @@ import drcc as drcc
 import montecarlo as mc
 
 #### PACKAGES ####
-import pandapower.plotting as pp
+import pandapower.plotting as pp 
 import matplotlib.pyplot as plt
 
 season = 'winter'
@@ -26,7 +26,7 @@ net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_p
 
 Bbus = dt.calculate_bbus_matrix(net)
 
-#results = drcc.drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, heatpump_scaling_factors,  max_iter_drcc=100, alpha=0.05, eta=5e-4)
+#results = drcc.drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, heatpump_scaling_factors_df,  max_iter_drcc=100, alpha=0.05, eta=5e-4)
 results = opf.solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors_df, Bbus)
 #results = rs.load_optim_results("opf_results.pkl")
 pl.plot_opf_results_plotly(results,net)

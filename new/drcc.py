@@ -99,7 +99,7 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
 
 
 ### solve the OPF problem ###
-def solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors, Bbus, Omega_I):
+def solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors_df, Bbus, Omega_I):
     model = gp.Model("opf_with_dc_load_flow")
 
     # Define the costs for optimization
@@ -230,12 +230,13 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpu
             name=f'flexible_load_{t}'
         )
 
-    # Create a dictionary mapping bus indices to scaling factors
+    # Create a dictionary mapping bus indices to scaling factors using heatpump_scaling_factors_df
     heatpump_scaling_factors_dict = {
-        bus: heatpump_scaling_factors[idx] for idx, bus in enumerate(flexible_load_buses)
-    }
+        bus: heatpump_scaling_factors_df.loc[heatpump_scaling_factors_df['bus'] == bus, 'p_mw'].values[0]
+        for bus in flexible_load_buses
+}
     
-    # Add thermal storage variables 
+    # Add thermal storage variables
     ts_size_mwh_scaled_dict = {
         bus: par.ts_size_mwh * heatpump_scaling_factors_dict[bus] for bus in flexible_load_buses
     }   
@@ -562,17 +563,17 @@ def calculate_sensitivity2(heatpumpForecast, heatpumpReal, opf_results, initial_
     
     return sensitivity_results
 
-def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, heatpumpForecast, heatpumpReal, heatpump_scaling_factors, max_iter_drcc, alpha, eta):
+def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, heatpumpForecast, heatpumpReal, heatpump_scaling_factors_df, max_iter_drcc, alpha, eta):
     # Step 1: Initialize covariance matrix
     season = 'winter'
-    net_forecast, const_load_household_fc, const_load_heatpump_fc, time_steps_fc, df_season_heatpump_prognosis, df_household, df_heatpump, heatpump_scaling_factors_fc = gd.setup_grid_irep_forecast(season)
+    net_forecast, const_load_household_fc, const_load_heatpump_fc, time_steps_fc, df_season_heatpump_prognosis, df_household, df_heatpump, heatpump_scaling_factors_fc_df = gd.setup_grid_irep_forecast(season)
 
     Omega_I_init = {t: {line.Index: 0 for line in net.line.itertuples()} for t in time_steps}
     print("Initializing Omega_I = 0")
     print("Solving forecast OPF")
-    initial_results = solve_opf(net_forecast, time_steps, const_load_heatpump_fc, const_load_household_fc, heatpump_scaling_factors_fc,  Bbus, Omega_I_init)
+    initial_results = solve_opf(net_forecast, time_steps, const_load_heatpump_fc, const_load_household_fc, heatpump_scaling_factors_fc_df,  Bbus, Omega_I_init)
     print("Solving Initial OPF with Omega_I = 0")
-    drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors, Bbus, Omega_I_init)
+    drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors_df, Bbus, Omega_I_init)
     #calcualte sensitivity from forecast & real data
     sensitivity = calculate_sensitivity2(heatpumpForecast, heatpumpReal, drcc_opf_results, initial_results, time_steps)
     print(f"Initial Sensitivity calculated")
@@ -632,7 +633,7 @@ def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
         previous_max_diff = copy.deepcopy(max_diff)
 
         # Re-run OPF with the updated Omega_I
-        drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors, Bbus, Omega_I)
+        drcc_opf_results = solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors_df, Bbus, Omega_I)
         
         #Calculate sensitivity based on the latest OPF results
         sensitivity = calculate_sensitivity2(heatpumpForecast, heatpumpReal, drcc_opf_results, initial_results, time_steps)
