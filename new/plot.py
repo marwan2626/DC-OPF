@@ -14,7 +14,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 import pandapower.plotting.plotly as pp_plotly
+import seaborn as sns
 
+###############################################################################
 def plot_load_p_mw(load_p_mw):
     plt.figure(figsize=(10, 5))
     for column in load_p_mw.columns:
@@ -442,3 +444,83 @@ def plot_opf_results_plotly(results,net):
                     yaxis_title='Power (MW)',
                     hovermode="x unified")
     fig.show()
+
+def plot_line_violation_boxplot(violations_df):
+
+    # Create the boxplot
+    plt.figure(figsize=(12, 6))
+    sns.boxplot(
+        x="line",
+        y="violation_probability_percent",
+        data=violations_df,
+        color="skyblue",
+        showfliers=True,
+        boxprops=dict(edgecolor="black"),
+    )
+
+    # Customize the plot
+    plt.xlabel("Line Index", fontsize=12)
+    plt.ylabel("Violation Probability (%)", fontsize=12)
+    plt.title("Violation Probability Boxplot for Each Line", fontsize=14)
+    plt.xticks(rotation=45)  # Rotate x-axis labels if necessary
+    plt.tight_layout()
+    plt.show()
+
+def plot_specific_line_violation_boxplot(violations_df, line_index):
+
+    plt.figure(figsize=(12, 6))
+    
+    # Create a boxplot: group probabilities by 'line'
+    sns.boxplot(
+        x='line', 
+        y='violation_probability', 
+        data=violations_df, 
+        color='skyblue'
+    )
+    
+    # Add labels and title
+    plt.xlabel("Line Index")
+    plt.ylabel("Violation Probability")
+    plt.title("Boxplot of Violation Probabilities Per Line")
+    
+    # Ensure x-axis ticks are readable
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def plot_violation_heatmap(violations_df, threshold=0.05):
+    """
+    Generates a heatmap of violation probabilities with lines on the y-axis and timesteps on the x-axis.
+
+    Args:
+        violations_df (pd.DataFrame): DataFrame containing columns 'line', 'time_step', and 'violation_probability'.
+        threshold (float): Minimum value for visualization. Values below this will be colored lightly.
+    """
+    # Pivot the DataFrame to get lines as rows and time_steps as columns
+    heatmap_data = violations_df.pivot(index='line', columns='time_step', values='violation_probability')
+
+    # Replace NaN with 0.0 for missing values
+    heatmap_data = heatmap_data.fillna(0)
+
+    # Apply a mask for values below the threshold (optional for visual emphasis)
+    mask = heatmap_data < threshold
+
+    # Plot the heatmap
+    plt.figure(figsize=(10, 50))  # Adjust size as needed for clarity
+    sns.heatmap(
+        heatmap_data,
+        cmap="Greys",  # Grayscale colormap for better printing
+        cbar_kws={'label': 'Violation Probability'},
+        annot=False,  # Set to True if you want to display numbers in the cells
+        mask=mask,    # Do not mask low values; show all values for clarity
+        linewidths=0,  # Remove borders around squares
+        vmin=0       # Ensure the color scale starts at 0
+    )
+
+    # Add axis labels and title
+    plt.xlabel("Time Step")
+    plt.ylabel("Line Index")
+    plt.title("Violation Probability Heatmap (Lines vs. Time Steps)")
+    plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
+    plt.tight_layout()
+    plt.show()

@@ -476,7 +476,7 @@ def setup_grid_irep_forecast(season):
     
     # Create a scaled profile DataFrame
     scaled_household_profiles = pd.DataFrame(
-        df_household['P_HOUSEHOLD_NORM'].values[:, None] * household_scaling_factors / 2.5,
+        df_household['P_HOUSEHOLD_NORM'].values[:, None] * household_scaling_factors / 3,
         columns=household_loads.index
     )
 
@@ -498,7 +498,7 @@ def setup_grid_irep_forecast(season):
         pp.create_load(
             net,
             bus=load.bus,  # Use the same bus as the relevant load
-            p_mw=load.p_mw*1.4,  # scale p_mw of the relevant load
+            p_mw=load.p_mw*1.3,  # scale p_mw of the relevant load
             q_mvar=load.q_mvar,  # Same q_mvar
             name=load.name.replace("LV4.101", "HP.101"),  # Change name prefix
             scaling=load.scaling,  # Same scaling

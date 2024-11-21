@@ -225,6 +225,7 @@ def run_single_sample_with_violation(
         trafo_violations,
     )
 
+
 def montecarlo_analysis_with_violations(
     net,
     time_steps,
@@ -272,6 +273,7 @@ def montecarlo_analysis_with_violations(
             for t, count in times.items():
                 overall_line_violations[line_idx][t] = overall_line_violations[line_idx].get(t, 0) + count
 
+
     for trafo_violations in trafo_violations_list:
         for t, count in trafo_violations.items():
             overall_trafo_violations[t] = overall_trafo_violations.get(t, 0) + count
@@ -316,9 +318,51 @@ def montecarlo_analysis_with_violations(
 
     total_time = time.time() - start_time
 
+    # Calculate violation probabilities
+    print("Overall Line Violations:")
+    for line_idx, times in overall_line_violations.items():
+        print(f"Line {line_idx}: {times}")
+    # Aggregate violation probabilities
+    violations_df = aggregate_line_violations(overall_line_violations, len(mc_samples), time_steps)
+    violations_df['violation_probability_percent'] = violations_df['violation_probability'] * 100
+    print("Aggregated Violations DataFrame:")
+    print(violations_df.head(20))
+
+
+
     print(f"Monte Carlo analysis completed for {len(mc_samples)} samples in parallel.")
     print(f"Total time taken: {total_time:.2f} seconds.")
     print(f"Probability of constraint violation: {violation_probability:.4f}")
     print(f"Violation log saved to {log_file}")
 
-    return all_results, violation_probability
+    return all_results, violation_probability, violations_df, overall_line_violations
+
+
+def aggregate_line_violations(overall_line_violations, total_mc_samples, time_steps):
+    records = []
+
+    # Only consider time steps where violations actually occurred
+    for line_idx, times in overall_line_violations.items():
+        for t, violation_count in times.items():
+            # Calculate the probability of violation
+            violation_probability = violation_count / total_mc_samples
+            records.append({
+                'line': line_idx,
+                'time_step': t,
+                'violation_probability': violation_probability,
+                'violation_probability_percent': violation_probability * 100,
+            })
+
+    # If no violations occurred for some lines, include them with probability 0.0
+    for line_idx in set(overall_line_violations.keys()):
+        existing_time_steps = overall_line_violations[line_idx].keys()
+        for t in time_steps:
+            if t not in existing_time_steps:
+                records.append({
+                    'line': line_idx,
+                    'time_step': t,
+                    'violation_probability': 0.0,
+                    'violation_probability_percent': 0.0,
+                })
+
+    return pd.DataFrame(records)

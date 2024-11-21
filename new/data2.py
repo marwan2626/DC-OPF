@@ -18,20 +18,21 @@ import drcc as drcc
 import montecarlo as mc
 
 #### PACKAGES ####
-import pandapower.plotting as pp 
-import matplotlib.pyplot as plt
+#import pandapower.plotting as pp 
+#import matplotlib.pyplot as plt
 
 season = 'winter'
 net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_prognosis, df_household, df_heatpump, heatpump_scaling_factors_df = gd.setup_grid_irep(season)
 
-Bbus = dt.calculate_bbus_matrix(net)
+#Bbus = dt.calculate_bbus_matrix(net)
 
-results = drcc.drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, heatpump_scaling_factors_df,  max_iter_drcc=100, alpha=0.05, eta=5e-4)
+#results = drcc.drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, heatpump_scaling_factors_df,  max_iter_drcc=100, alpha=0.05, eta=5e-4)
 #results = opf.solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatpump_scaling_factors_df, Bbus)
 #results = rs.load_optim_results("opf_results.pkl")
-pl.plot_opf_results_plotly(results,net)
+results = rs.load_optim_results("drcc_opf_results.pkl")
+#pl.plot_opf_results_plotly(results,net)
 
-all_results = mc.montecarlo_analysis_with_violations(
+all_results, violation_probability, violations_df, overall_line_violations = mc.montecarlo_analysis_with_violations(
     net,
     time_steps,
     df_season_heatpump_prognosis,
@@ -42,7 +43,10 @@ all_results = mc.montecarlo_analysis_with_violations(
 )
 
 #results = drcc.drcc_opf(net, time_steps, const_load_heatpump, const_load_household, Bbus, df_season_heatpump_prognosis, df_heatpump, max_iter_drcc=100, alpha=0.05, eta=1e-5)
+#pl.plot_line_violation_boxplot(violations_df)
+#pl.plot_specific_line_violation_boxplot(violations_df, line_index=24)
 
+pl.plot_violation_heatmap(violations_df)
 
 #pl.plot_opf_results(results)
 

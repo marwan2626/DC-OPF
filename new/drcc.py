@@ -85,7 +85,7 @@ def calculate_omega_I(alpha, sensitivity, cov_matrix, Omega_I):
     Omega_I_new = {t: {line: 0 for line in Omega_I[t]} for t in Omega_I}
     
     # Compute scaling factor
-    scaling_factor = np.sqrt((1 - alpha) / (alpha)) *2.576 # 99% confidence interval
+    scaling_factor = (1 - alpha) / (alpha) # 95% confidence interval
 
     # Compute the square root of the covariance matrix
     cov_sqrt = np.sqrt(cov_matrix)
