@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 #### SCRIPTS ####
 import parameters as par
+import results as rs
 
 ###############################################################################
 ## Generate Samples ##
@@ -134,8 +135,44 @@ def montecarlo_analysis_parallel(net, time_steps, df_season_heatpump_prognosis, 
     
     return all_results
 
+
+###############################################################################
+
+
+
+def aggregate_line_violations(overall_line_violations, total_mc_samples, time_steps):
+    records = []
+
+    # Only consider time steps where violations actually occurred
+    for line_idx, times in overall_line_violations.items():
+        for t, violation_count in times.items():
+            # Calculate the probability of violation
+            violation_probability = violation_count / total_mc_samples
+            records.append({
+                'line': line_idx,
+                'time_step': t,
+                'violation_probability': violation_probability,
+                'violation_probability_percent': violation_probability * 100,
+            })
+
+    # If no violations occurred for some lines, include them with probability 0.0
+    for line_idx in set(overall_line_violations.keys()):
+        existing_time_steps = overall_line_violations[line_idx].keys()
+        for t in time_steps:
+            if t not in existing_time_steps:
+                records.append({
+                    'line': line_idx,
+                    'time_step': t,
+                    'violation_probability': 0.0,
+                    'violation_probability_percent': 0.0,
+                })
+
+    return pd.DataFrame(records)
+
+
+
 def run_single_sample_with_violation(
-    net, time_steps, sample_profile, opf_results, const_load_household, heatpump_scaling_factors_df
+    net, time_steps, sample_profile, opf_results, const_load_household, const_load_heatpump, heatpump_scaling_factors_df
 ):
     net = net.deepcopy()
 
@@ -151,6 +188,23 @@ def run_single_sample_with_violation(
 
     # Results storage
     sample_results = {'loads': [], 'buses': [], 'lines': [], 'trafos': []}
+    flexible_time_synchronized_loads = {t: {} for t in time_steps}
+
+    # Add variables for each time step
+    for t in time_steps:
+        # Update const_pv and const_load for this time step
+        const_load_heatpump.time_step(net, time=t)
+
+        # Initialize dictionaries for time-synchronized loads
+        flexible_time_synchronized_loads[t] = {}
+        # Iterate over all loads
+        for load in net.load.itertuples():
+            bus = load.bus
+            if load.controllable:
+                # Flexible load
+                flexible_time_synchronized_loads[t][bus] = (
+                    flexible_time_synchronized_loads[t].get(bus, 0.0) + load.p_mw
+                )
 
     for t in time_steps:
         # Update fixed household loads using the ConstControl
@@ -162,16 +216,30 @@ def run_single_sample_with_violation(
 
             try:
                 # Map Monte Carlo sample to heat pump load
-                sampled_heat_demand = sample_profile.loc[t] * scaling_factor
+                sampled_heat_demand = sample_profile.loc[t].at['P_HEATPUMP_NORM'] * scaling_factor
+                #print(f"Time step {t}, Bus {bus}: Sampled heat demand = {sampled_heat_demand}")  # Debug statement
 
                 # Compute adjusted load
-                nominal_heat_demand = flexible_load_vars[t][bus]
+                nominal_heatpump = flexible_load_vars[t][bus]
                 ts_out_value = ts_out[t][bus]
                 ts_in_value = ts_in[t][bus]
-                adjusted_load = nominal_heat_demand + (sampled_heat_demand - nominal_heat_demand)
+                nominal_heat_demand = flexible_time_synchronized_loads[t][bus] 
+
+                adjusted_load = nominal_heatpump + (sampled_heat_demand - nominal_heat_demand)
+
+                # print(
+                #     f"Time step {t}, Bus {bus}: "
+                #     f"Nominal heatpump = {nominal_heatpump}, "
+                #     f"Nominal heat demand = {nominal_heat_demand}, "
+                #     f"Sampled heat demand = {sampled_heat_demand}, "
+                #     f"Adjusted load = {adjusted_load}"
+                # )  # Debug statement
 
                 # Update the load in the network
-                net.load.at[load_index, 'p_mw'] = adjusted_load 
+                net.load.at[load_index, 'p_mw'] = adjusted_load
+                if t == 65:
+                    print(f"Assigned adjusted load {adjusted_load} to load index {load_index}, bus {bus}")
+                    print(f"Load with index {load_index} is now {net.load.at[load_index, 'p_mw']}")
 
             except Exception as e:
                 print(f"Error updating load_index {load_index}, bus {bus} at time {t}: {e}")
@@ -179,6 +247,8 @@ def run_single_sample_with_violation(
 
         try:
             pp.rundcpp(net, check_connectivity=False, verbose=False)
+            if t == 65:
+                print(net.load)
         except pp.optimality.PandapowerRunError:
             total_violations += 1
             continue
@@ -226,18 +296,18 @@ def run_single_sample_with_violation(
     )
 
 
+
 def montecarlo_analysis_with_violations(
     net,
     time_steps,
-    df_season_heatpump_prognosis,
     opf_results,
     const_load_household,
+    const_load_heatpump,
     heatpump_scaling_factors_df,
+    mc_samples,
     n_jobs=-1,
     log_file="violation_log.txt",
 ):
-    # Generate Monte Carlo samples for heat demand
-    mc_samples = generate_samples(df_season_heatpump_prognosis)
 
     # Initialize log storage
     overall_line_violations = {}
@@ -254,6 +324,7 @@ def montecarlo_analysis_with_violations(
             sample_profile,
             opf_results,
             const_load_household,
+            const_load_heatpump,
             heatpump_scaling_factors_df,
         )
         for sample_profile in tqdm(mc_samples, desc="Processing samples")
@@ -319,50 +390,22 @@ def montecarlo_analysis_with_violations(
     total_time = time.time() - start_time
 
     # Calculate violation probabilities
-    print("Overall Line Violations:")
-    for line_idx, times in overall_line_violations.items():
-        print(f"Line {line_idx}: {times}")
+    # print("Overall Line Violations:")
+    # for line_idx, times in overall_line_violations.items():
+    #     print(f"Line {line_idx}: {times}")
     # Aggregate violation probabilities
     violations_df = aggregate_line_violations(overall_line_violations, len(mc_samples), time_steps)
     violations_df['violation_probability_percent'] = violations_df['violation_probability'] * 100
-    print("Aggregated Violations DataFrame:")
-    print(violations_df.head(20))
+    # print("Aggregated Violations DataFrame:")
+    # print(violations_df.head(20))
 
 
 
     print(f"Monte Carlo analysis completed for {len(mc_samples)} samples in parallel.")
     print(f"Total time taken: {total_time:.2f} seconds.")
-    print(f"Probability of constraint violation: {violation_probability:.4f}")
+    # print(f"Probability of constraint violation: {violation_probability:.4f}")
     print(f"Violation log saved to {log_file}")
+    
 
     return all_results, violation_probability, violations_df, overall_line_violations
 
-
-def aggregate_line_violations(overall_line_violations, total_mc_samples, time_steps):
-    records = []
-
-    # Only consider time steps where violations actually occurred
-    for line_idx, times in overall_line_violations.items():
-        for t, violation_count in times.items():
-            # Calculate the probability of violation
-            violation_probability = violation_count / total_mc_samples
-            records.append({
-                'line': line_idx,
-                'time_step': t,
-                'violation_probability': violation_probability,
-                'violation_probability_percent': violation_probability * 100,
-            })
-
-    # If no violations occurred for some lines, include them with probability 0.0
-    for line_idx in set(overall_line_violations.keys()):
-        existing_time_steps = overall_line_violations[line_idx].keys()
-        for t in time_steps:
-            if t not in existing_time_steps:
-                records.append({
-                    'line': line_idx,
-                    'time_step': t,
-                    'violation_probability': 0.0,
-                    'violation_probability_percent': 0.0,
-                })
-
-    return pd.DataFrame(records)

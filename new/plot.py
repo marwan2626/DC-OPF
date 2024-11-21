@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import pandapower.plotting.plotly as pp_plotly
 import seaborn as sns
+import matplotlib.ticker as ticker
 
 ###############################################################################
 def plot_load_p_mw(load_p_mw):
@@ -273,7 +274,7 @@ def plot_line_current_histogram(all_results, net, line_index, time_step):
     plt.grid(True)
     plt.show()
 
-def plot_opf_results_plotly(results,net):
+def plot_opf_results_plotly(results):
     # Extract the results from the dictionary
     pv_gen = results['pv_gen']
     load = results['load']
@@ -505,22 +506,103 @@ def plot_violation_heatmap(violations_df, threshold=0.05):
     # Apply a mask for values below the threshold (optional for visual emphasis)
     mask = heatmap_data < threshold
 
-    # Plot the heatmap
-    plt.figure(figsize=(10, 50))  # Adjust size as needed for clarity
-    sns.heatmap(
+    # Create figure and axis with adjusted size
+    fig, ax = plt.subplots(figsize=(40, 10))  # Explicitly set figure size
+
+    ax = sns.heatmap(
         heatmap_data,
-        cmap="Greys",  # Grayscale colormap for better printing
+        cmap="Blues",  # Grayscale colormap for better printing
         cbar_kws={'label': 'Violation Probability'},
         annot=False,  # Set to True if you want to display numbers in the cells
-        mask=mask,    # Do not mask low values; show all values for clarity
+        mask=None,    # Do not mask low values; show all values for clarity
         linewidths=0,  # Remove borders around squares
-        vmin=0       # Ensure the color scale starts at 0
+        vmin=0,       # Ensure the color scale starts at 0
+        #vmax=1,        # Ensure the color scale covers the full range (0 to 1)
+        xticklabels=10,  # Show every 10th x-tick
+        yticklabels=1    # Show all y-ticks
     )
 
     # Add axis labels and title
     plt.xlabel("Time Step")
     plt.ylabel("Line Index")
     plt.title("Violation Probability Heatmap (Lines vs. Time Steps)")
+
+    # Set x-ticks to step by 10
+    #ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
+
+    # Add a frame around the plot
+    ax.figure.gca().spines['top'].set_visible(True)
+    ax.figure.gca().spines['right'].set_visible(True)
+    ax.figure.gca().spines['left'].set_visible(True)
+    ax.figure.gca().spines['bottom'].set_visible(True)
+
     plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
+    plt.tight_layout()
+    plt.show()
+
+def compare_heatmap(violations_df_opf, violations_df_drcc, threshold=0.05):
+
+    # Pivot the DataFrame to get lines as rows and time_steps as columns
+    heatmap_data_opf = violations_df_opf.pivot(index='line', columns='time_step', values='violation_probability')
+    heatmap_data_drcc = violations_df_drcc.pivot(index='line', columns='time_step', values='violation_probability')
+
+    # Replace NaN with 0.0 for missing values
+    heatmap_data_opf = heatmap_data_opf.fillna(0)
+    heatmap_data_drcc = heatmap_data_drcc.fillna(0)
+
+    # Apply a mask for values below the threshold (optional for visual emphasis)
+    #mask = heatmap_data < threshold
+
+    # Create figure and axis with adjusted size
+    fig, axes = plt.subplots(2, 1, figsize=(40, 10), sharex=False)  # Explicitly set figure size
+
+    sns.heatmap(
+        heatmap_data_opf,
+        cmap="Blues",  # Grayscale colormap for better printing
+        cbar_kws={'label': 'Violation Probability'},
+        annot=False,  # Set to True if you want to display numbers in the cells
+        mask=None,    # Do not mask low values; show all values for clarity
+        linewidths=0,  # Remove borders around squares
+        vmin=0,       # Ensure the color scale starts at 0
+        #vmax=1,        # Ensure the color scale covers the full range (0 to 1)
+        xticklabels=10,  # Show every 10th x-tick
+        yticklabels=1,    # Show all y-ticks
+        ax=axes[0]
+    )
+
+    # Add axis labels and title
+    axes[0].set_title("Heatmap for deterministic optimization")
+    axes[0].set_ylabel("Line Index")
+    axes[0].set_xlabel("Time Step")
+
+    sns.heatmap(
+        heatmap_data_drcc,
+        cmap="Blues",  # Grayscale colormap for better printing
+        cbar_kws={'label': 'Violation Probability'},
+        annot=False,  # Set to True if you want to display numbers in the cells
+        mask=None,    # Do not mask low values; show all values for clarity
+        linewidths=0,  # Remove borders around squares
+        vmin=0,       # Ensure the color scale starts at 0
+        #vmax=1,        # Ensure the color scale covers the full range (0 to 1)
+        xticklabels=10,  # Show every 10th x-tick
+        yticklabels=1,    # Show all y-ticks
+        ax=axes[1]
+    )
+
+    # Add axis labels and title
+    axes[1].set_title("Heatmap for DRCC optimization")
+    axes[1].set_ylabel("Line Index")
+    axes[1].set_xlabel("Time Step")
+
+    # Set x-ticks to step by 10
+    #ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
+
+    # Add a frame around each subplot
+    for ax in axes:
+        ax.spines['top'].set_visible(True)
+        ax.spines['right'].set_visible(True)
+        ax.spines['bottom'].set_visible(True)
+        ax.spines['left'].set_visible(True)
+
     plt.tight_layout()
     plt.show()

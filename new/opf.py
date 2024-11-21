@@ -1535,7 +1535,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
 
     # Check if optimization was successful
     if model.status == gp.GRB.OPTIMAL:
-        print(f"Optimal Objective Value: {model.ObjVal}")
+        print(f"OPF Optimal Objective Value: {model.ObjVal}")
         # Extract optimized values for PV generation, external grid power, loads, and theta
         for t in time_steps:
             pv_gen_results[t] = {bus: pv_gen_vars[t][bus].x for bus in pv_buses}
@@ -1599,11 +1599,11 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
     
     elif model.status == gp.GRB.INFEASIBLE:
         # If the model is infeasible, write the model to an ILP file for debugging
-        print("Optimization failed - model is infeasible. Writing model to 'infeasible_model.ilp'")
+        print("OPF Optimization failed - model is infeasible. Writing model to 'infeasible_model.ilp'")
         model.computeIIS()  # Compute IIS to identify the infeasible set
         model.write("infeasible_model.ilp")
         return None
     else:
-        print(f"Optimization failed with status: {model.status}")
+        print(f"OPF Optimization failed with status: {model.status}")
         return None
     

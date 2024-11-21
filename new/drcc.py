@@ -632,6 +632,10 @@ def drcc_opf2(net, time_steps, const_load_heatpump, const_load_household, Bbus, 
             print(f"Converged in {drcc_iter + 1} DRCC iterations based on max difference convergence.")
             break
 
+        if (drcc_iter > 1) and abs(max_diff < eta):
+            print(f"Converged in {drcc_iter + 1} DRCC iterations based on max difference convergence.")
+            break
+
         # Update Omega_I_prev and previous_max_diff for next iteration
         Omega_I_prev = copy.deepcopy(Omega_I)
         previous_max_diff = copy.deepcopy(max_diff)

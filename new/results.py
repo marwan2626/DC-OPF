@@ -73,9 +73,9 @@ def save_optim_results(results, filename):
 def load_optim_results(filename):
     try:
         with open(filename, 'rb') as file:
-            drcc_opf_results = pkl.load(file)
-        print(f"DRCC OPF results loaded successfully from {filename}.")
-        return drcc_opf_results
+            results = pkl.load(file)
+        print(f"Results loaded successfully from {filename}.")
+        return results
     except FileNotFoundError:
         print(f"Error: File {filename} not found.")
         return None
