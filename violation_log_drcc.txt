@@ -1,17 +1,6 @@
 Line Constraint Violations:
-Line 24: Time Step 323, 1 violations
-Line 24: Time Step 358, 1 violations
-Line 24: Time Step 549, 1 violations
-Line 24: Time Step 606, 1 violations
 
 Transformer Constraint Violations:
-Time Step 323, 1 violations
-Time Step 358, 1 violations
-Time Step 526, 1 violations
-Time Step 549, 1 violations
-Time Step 606, 1 violations
-Time Step 632, 1 violations
-Time Step 649, 1 violations
 
 Maximum Violations:
-Line 24, Time Step 323: 1 violations
+Line None, Time Step None: 0 violations

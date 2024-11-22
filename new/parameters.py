@@ -26,8 +26,8 @@ import numpy as np
 ## GENERAL ## 
 ###############################################################################
 ### NETWORK ###
-hp_scaling = 80000 # heat pump scaling factor
-house_scaling = 400000 # household scaling factor
+hp_scaling = 1.3 # heat pump scaling factor
+hh_scaling = 3 # household scaling factor
 
 hp_max_power = 1 # heat pump max power in MW
 ts_size_mwh = 48*4 # thermal storage size in MWh

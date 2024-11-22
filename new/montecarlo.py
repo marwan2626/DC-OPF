@@ -32,17 +32,23 @@ def generate_samples(df_season_heatpump_prognosis):
     df_season_heatpump_prognosis['meanP_norm'] = df_season_heatpump_prognosis['meanP'] / max_mean
     df_season_heatpump_prognosis['stdP_norm'] = df_season_heatpump_prognosis['stdP'] / max_mean
     
-    n_samples = par.N_MC
     # Extract mean and std deviation as numpy arrays for efficient computation
     meanP = df_season_heatpump_prognosis['meanP_norm'].values
     stdP = df_season_heatpump_prognosis['stdP_norm'].values
     timesteps = df_season_heatpump_prognosis.index
-   
-    # Generate samples as a 2D NumPy array
-    samples = np.random.normal(
-        loc=meanP,                     # Mean for each timestep
-        scale=stdP,                    # Std deviation for each timestep
-        size=(n_samples, len(meanP))   # Shape: (n_samples, n_timesteps)
+
+    n_samples = par.N_MC
+    
+    # Calculate bounds for the uniform distribution
+    lower_bounds = meanP - stdP
+    upper_bounds = meanP + stdP
+
+    # Generate samples uniformly within the bounds
+
+    samples = np.random.uniform(
+        low=lower_bounds,  # Lower bounds for each timestep
+        high=upper_bounds, # Upper bounds for each timestep
+        size=(n_samples, len(meanP))  # Shape: (n_samples, n_timesteps)
     )
 
     # Convert each sample to a DataFrame to mimic the old format
@@ -54,7 +60,6 @@ def generate_samples(df_season_heatpump_prognosis):
         sample_profiles.append(df_sample)
 
     return sample_profiles
-
 
 
 
@@ -140,26 +145,38 @@ def montecarlo_analysis_parallel(net, time_steps, df_season_heatpump_prognosis, 
 
 
 
-def aggregate_line_violations(overall_line_violations, total_mc_samples, time_steps):
+def aggregate_line_violations(overall_line_violations, total_mc_samples, time_steps, line_indices):
     records = []
 
-    # Only consider time steps where violations actually occurred
-    for line_idx, times in overall_line_violations.items():
-        for t, violation_count in times.items():
-            # Calculate the probability of violation
-            violation_probability = violation_count / total_mc_samples
-            records.append({
-                'line': line_idx,
-                'time_step': t,
-                'violation_probability': violation_probability,
-                'violation_probability_percent': violation_probability * 100,
-            })
+    # If violations occurred, process them
+    if overall_line_violations:
+        for line_idx, times in overall_line_violations.items():
+            for t, violation_count in times.items():
+                # Calculate the probability of violation
+                violation_probability = violation_count / total_mc_samples
+                records.append({
+                    'line': line_idx,
+                    'time_step': t,
+                    'violation_probability': violation_probability,
+                    'violation_probability_percent': violation_probability * 100,
+                })
 
-    # If no violations occurred for some lines, include them with probability 0.0
-    for line_idx in set(overall_line_violations.keys()):
-        existing_time_steps = overall_line_violations[line_idx].keys()
-        for t in time_steps:
-            if t not in existing_time_steps:
+        # If no violations occurred for some time steps, include them with probability 0.0
+        for line_idx in overall_line_violations.keys():
+            existing_time_steps = overall_line_violations[line_idx].keys()
+            for t in time_steps:
+                if t not in existing_time_steps:
+                    records.append({
+                        'line': line_idx,
+                        'time_step': t,
+                        'violation_probability': 0.0,
+                        'violation_probability_percent': 0.0,
+                    })
+
+    # If no violations occurred at all, populate all time steps for all lines with 0
+    else:
+        for line_idx in line_indices:
+            for t in time_steps:
                 records.append({
                     'line': line_idx,
                     'time_step': t,
@@ -168,6 +185,7 @@ def aggregate_line_violations(overall_line_violations, total_mc_samples, time_st
                 })
 
     return pd.DataFrame(records)
+
 
 
 
@@ -185,6 +203,8 @@ def run_single_sample_with_violation(
     line_violations = {}  # Store line violations: {line_idx: {timestep: count}}
     trafo_violations = {}  # Store transformer violations: {timestep: count}
     total_violations = 0
+    # Initialize mc_line_results to store loading results
+    mc_line_results = {line_idx: [] for line_idx in net.line.index}
 
     # Results storage
     sample_results = {'loads': [], 'buses': [], 'lines': [], 'trafos': []}
@@ -221,11 +241,12 @@ def run_single_sample_with_violation(
 
                 # Compute adjusted load
                 nominal_heatpump = flexible_load_vars[t][bus]
-                ts_out_value = ts_out[t][bus]
-                ts_in_value = ts_in[t][bus]
+                #ts_out_value = ts_out[t][bus]
+                #ts_in_value = ts_in[t][bus]
                 nominal_heat_demand = flexible_time_synchronized_loads[t][bus] 
 
-                adjusted_load = nominal_heatpump + (sampled_heat_demand - nominal_heat_demand)
+                # Ensure adjusted_load is non-negative
+                adjusted_load = max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand))
 
                 # print(
                 #     f"Time step {t}, Bus {bus}: "
@@ -236,10 +257,10 @@ def run_single_sample_with_violation(
                 # )  # Debug statement
 
                 # Update the load in the network
-                net.load.at[load_index, 'p_mw'] = adjusted_load
-                if t == 65:
-                    print(f"Assigned adjusted load {adjusted_load} to load index {load_index}, bus {bus}")
-                    print(f"Load with index {load_index} is now {net.load.at[load_index, 'p_mw']}")
+                net.load.at[load_index, 'p_mw'] = float(adjusted_load)
+                # if t == 65:
+                #     print(f"Assigned adjusted load {adjusted_load} to load index {load_index}, bus {bus}")
+                #     print(f"Load with index {load_index} is now {net.load.at[load_index, 'p_mw']}")
 
             except Exception as e:
                 print(f"Error updating load_index {load_index}, bus {bus} at time {t}: {e}")
@@ -247,11 +268,17 @@ def run_single_sample_with_violation(
 
         try:
             pp.rundcpp(net, check_connectivity=False, verbose=False)
-            if t == 65:
-                print(net.load)
+            #print(f"[INFO] Pandapower run successful for time step {t}.")
+            # if t == 65:
+            #     print(net.load)
         except pp.optimality.PandapowerRunError:
             total_violations += 1
+            print(f"[ERROR] Pandapower failed to converge for time step {t}.")
             continue
+
+        # Save line loading results into mc_line_results
+        for line_idx, loading in net.res_line['loading_percent'].items():
+            mc_line_results[line_idx].append({'time_step': t, 'loading_percent': loading})
 
         # Check for line violations
         for line_idx, loading in net.res_line['loading_percent'].items():
@@ -290,6 +317,7 @@ def run_single_sample_with_violation(
         pd.concat(sample_results['buses'], ignore_index=True),
         pd.concat(sample_results['lines'], ignore_index=True),
         pd.concat(sample_results['trafos'], ignore_index=True),
+        mc_line_results,
         total_violations,
         line_violations,
         trafo_violations,
@@ -305,14 +333,14 @@ def montecarlo_analysis_with_violations(
     const_load_heatpump,
     heatpump_scaling_factors_df,
     mc_samples,
-    n_jobs=-1,
-    log_file="violation_log.txt",
+    n_jobs,
+    log_file,
 ):
 
     # Initialize log storage
     overall_line_violations = {}
     overall_trafo_violations = {}
-
+    combined_mc_line_results = []
     # Start timing
     start_time = time.time()
 
@@ -330,11 +358,34 @@ def montecarlo_analysis_with_violations(
         for sample_profile in tqdm(mc_samples, desc="Processing samples")
     )
 
+    # Combine results from all samples
+    for single_sample_result in results_and_violations:
+        (
+            _loads_df, _buses_df, _lines_df, _trafos_df,  # Other results (optional to use)
+            sample_mc_line_results,
+            sample_total_violations,
+            sample_line_violations,
+            sample_trafo_violations
+        ) = single_sample_result
+
+    # Add sample line results to combined_mc_line_results
+    for line_idx, results in sample_mc_line_results.items():
+        for result in results:
+            combined_mc_line_results.append({
+                'line': line_idx,
+                'time_step': result['time_step'],
+                'loading_percent': result['loading_percent']
+            })
+    
+    # Convert combined_mc_line_results into a DataFrame
+    mc_line_results_df = pd.DataFrame(combined_mc_line_results)
+
     # Process results
     all_results = [res[:-3] for res in results_and_violations]
     violation_counts = [res[-3] for res in results_and_violations]
     line_violations_list = [res[-2] for res in results_and_violations]
     trafo_violations_list = [res[-1] for res in results_and_violations]
+
 
     # Aggregate line and transformer violations
     for line_violations in line_violations_list:
@@ -391,13 +442,16 @@ def montecarlo_analysis_with_violations(
 
     # Calculate violation probabilities
     # print("Overall Line Violations:")
-    # for line_idx, times in overall_line_violations.items():
-    #     print(f"Line {line_idx}: {times}")
+    # Extract line_indices from mc_line_results_df
+    line_indices = mc_line_results_df['line'].unique()
+    for line_idx, times in overall_line_violations.items():
+        print(f"Line {line_idx}: {times}")
     # Aggregate violation probabilities
-    violations_df = aggregate_line_violations(overall_line_violations, len(mc_samples), time_steps)
+    violations_df = aggregate_line_violations(overall_line_violations, len(mc_samples), time_steps, line_indices)
+    print("Aggregated Violations DataFrame:")
+    print(violations_df.head(20))
     violations_df['violation_probability_percent'] = violations_df['violation_probability'] * 100
-    # print("Aggregated Violations DataFrame:")
-    # print(violations_df.head(20))
+
 
 
 
@@ -407,5 +461,5 @@ def montecarlo_analysis_with_violations(
     print(f"Violation log saved to {log_file}")
     
 
-    return all_results, violation_probability, violations_df, overall_line_violations
+    return all_results, violation_probability, violations_df, overall_line_violations, mc_line_results_df
 

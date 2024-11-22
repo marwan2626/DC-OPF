@@ -554,7 +554,7 @@ def compare_heatmap(violations_df_opf, violations_df_drcc, threshold=0.05):
     #mask = heatmap_data < threshold
 
     # Create figure and axis with adjusted size
-    fig, axes = plt.subplots(2, 1, figsize=(40, 10), sharex=False)  # Explicitly set figure size
+    fig, axes = plt.subplots(2, 1, figsize=(40, 20), sharex=False)  # Explicitly set figure size
 
     sns.heatmap(
         heatmap_data_opf,
@@ -605,4 +605,44 @@ def compare_heatmap(violations_df_opf, violations_df_drcc, threshold=0.05):
         ax.spines['left'].set_visible(True)
 
     plt.tight_layout()
+    plt.show()
+
+
+def box_line_loading_two_subplots(mc_line_results_df1, mc_line_results_df2):
+    # Create a figure with two subplots
+    fig, axes = plt.subplots(2, 1, figsize=(20, 15), sharex=True)
+
+    # Plot the first DataFrame
+    sns.boxplot(
+        data=mc_line_results_df1,
+        x="line",
+        y="loading_percent",
+        color="lightgray",
+        showfliers=True,
+        ax=axes[0]
+    )
+    axes[0].set_ylim(0, 100)  # Set y-axis limits
+    axes[0].set_ylabel("Loading Percentage (%)")
+    axes[0].set_title("Line Loading Percentages Across Monte Carlo Samples (OPF)")
+    axes[0].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)  # Hide x-axis labels for the top plot
+
+    # Plot the second DataFrame
+    sns.boxplot(
+        data=mc_line_results_df2,
+        x="line",
+        y="loading_percent",
+        color="lightgray",
+        showfliers=True,
+        ax=axes[1]
+    )
+    axes[1].set_ylim(0, 100)  # Set y-axis limits
+    axes[1].set_xlabel("Line Index")
+    axes[1].set_ylabel("Loading Percentage (%)")
+    axes[1].set_title("Line Loading Percentages Across Monte Carlo Samples (DRCC)")
+    axes[1].tick_params(axis='x', rotation=45, labelsize=10)  # Rotate x-axis labels for better readability
+
+    # Adjust layout for better spacing
+    plt.tight_layout()
+
+    # Show the plot
     plt.show()
