@@ -277,7 +277,7 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpu
 
                     # 3. Storage Charging: use excess power for storage charging if available
                     model.addConstr(
-                        ts_in_vars[t][bus] <= flexible_load_vars[t][bus],
+                        ts_in_vars[t][bus] <= flexible_load_vars[t][bus] * par.COP,
                         name=f'storage_charging_{t}_{bus}'
                     )
 

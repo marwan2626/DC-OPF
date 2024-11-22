@@ -1395,7 +1395,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
                     # Define the heat demand for the bus, representing the electrical equivalent
                     heat_demand = flexible_time_synchronized_loads[t][bus]  # or load profile representing heat demand
 
-                    # 1. Heat Demand Coverage: flexible_load_vars and/or thermal storage must meet the demand
+                    # 1. Heat Demand Coverage: flexible_load_vars and/or thermal storage must meet the demand (all in electrical equivalent)
                     model.addConstr(
                         flexible_load_vars[t][bus] + ((ts_out_vars[t][bus] - ts_in_vars[t][bus]) / par.COP) >= heat_demand,
                         name=f'heat_demand_coverage_{t}_{bus}'
@@ -1403,7 +1403,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
 
                     # 3. Storage Charging: use excess power for storage charging if available
                     model.addConstr(
-                        ts_in_vars[t][bus] <= flexible_load_vars[t][bus],
+                        ts_in_vars[t][bus] <= flexible_load_vars[t][bus] * par.COP,
                         name=f'storage_charging_{t}_{bus}'
                     )
 
