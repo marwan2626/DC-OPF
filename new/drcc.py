@@ -282,7 +282,7 @@ def solve_opf(net, time_steps, const_load_heatpump, const_load_household, heatpu
                     )
 
                     model.addConstr(
-                        ts_out_vars[t][bus] <= par.ts_out_max,
+                        ts_out_vars[t][bus] <= ts_size_mwh_scaled_dict[bus]/24,
                         name=f'storage_charging_{t}_{bus}'
                     )
 
