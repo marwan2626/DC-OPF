@@ -511,31 +511,9 @@ def setup_grid_irep_forecast(season):
     
     heatpump_loads = net.load[net.load['name'].str.startswith("HP.101")]
     # Load the real load profile CSV
-    df_heatpump = pd.read_csv("realData_winter.csv", sep=';')
         
-    # Process load profile for bus 1
-    df_heatpump['P_HEATPUMP'] = df_heatpump['P_HEATPUMP'].str.replace(",", ".").astype(float)
-    time_steps = df_heatpump.index
-    threshold = 0.5  # Z-score threshold for identifying outliers
-    mean = df_heatpump['P_HEATPUMP'].mean()
-    std = df_heatpump['P_HEATPUMP'].std()
-    z_scores = (df_heatpump['P_HEATPUMP'] - mean) / std
-    # Replace outliers with a rolling average (smoothing) or cap them
-    df_heatpump['P_HEATPUMP_smooth'] = np.where(
-        abs(z_scores) > threshold,
-        df_heatpump['P_HEATPUMP'].rolling(window=5, min_periods=1, center=True).mean(),
-        df_heatpump['P_HEATPUMP']
-    )
-
-    # Replace outliers with a rolling average (smoothing) or cap them
-    df_heatpump['P_HEATPUMP_smooth'] = np.where(
-        abs(z_scores) > threshold,
-        df_heatpump['P_HEATPUMP'].rolling(window=4, min_periods=1, center=True).mean(),
-        df_heatpump['P_HEATPUMP']
-    )
-
-    df_heatpump['P_HEATPUMP_NORM'] = df_heatpump['P_HEATPUMP_smooth'] / df_season_heatpump_prognosis['meanP'].max()
     df_season_heatpump_prognosis['meanP_NORM'] = df_season_heatpump_prognosis['meanP'] / df_season_heatpump_prognosis['meanP'].max()
+    df_season_heatpump_prognosis['stdP_NORM'] = df_season_heatpump_prognosis['stdP'] / df_season_heatpump_prognosis['meanP'].max()
     df_season_heatpump_prognosis['p_mw'] = df_season_heatpump_prognosis['meanP_NORM']
 
 
@@ -574,5 +552,5 @@ def setup_grid_irep_forecast(season):
         net.load.at[load_idx, 'controllable'] = False
 
 
-    return net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_prognosis, df_household, df_heatpump, heatpump_scaling_factors_df
+    return net, const_load_household, const_load_heatpump, time_steps, df_season_heatpump_prognosis, df_household, heatpump_scaling_factors_df
 #return net, const_load_heatpump, const_load_household, time_steps, df_season_heatpump_prognosis, df_heatpump, df_households

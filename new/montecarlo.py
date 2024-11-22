@@ -45,11 +45,18 @@ def generate_samples(df_season_heatpump_prognosis):
 
     # Generate samples uniformly within the bounds
 
-    samples = np.random.uniform(
-        low=lower_bounds,  # Lower bounds for each timestep
-        high=upper_bounds, # Upper bounds for each timestep
-        size=(n_samples, len(meanP))  # Shape: (n_samples, n_timesteps)
+    # samples = np.random.uniform(
+    #     low=lower_bounds,  # Lower bounds for each timestep
+    #     high=upper_bounds, # Upper bounds for each timestep
+    #     size=(n_samples, len(meanP))  # Shape: (n_samples, n_timesteps)
+    # )
+
+    samples = np.random.normal(
+        loc=meanP,                     # Mean for each timestep
+        scale=stdP,                    # Std deviation for each timestep
+        size=(n_samples, len(meanP))   # Shape: (n_samples, n_timesteps)
     )
+
 
     # Convert each sample to a DataFrame to mimic the old format
     sample_profiles = []
@@ -249,8 +256,12 @@ def run_single_sample_with_violation(
                 nominal_heat_demand = flexible_time_synchronized_loads[t][bus] 
 
                 # Ensure adjusted_load is non-negative
-                #adjusted_load = max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand))
-                adjusted_load = min(par.hp_max_power, max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand)))
+                #adjusted_load = min(sampled_heat_demand,max(0.0, sampled_heat_demand - (nominal_heatpump - nominal_heat_demand)))
+                #adjusted_load = min(par.hp_max_power, max(0.0, sampled_heat_demand - (nominal_heatpump - nominal_heat_demand)))
+                adjusted_load = max(
+                    0.0,
+                    sampled_heat_demand - (nominal_heatpump - nominal_heat_demand + ts_out[t].get(bus, 0.0))
+                )
 
                 # print(
                 #     f"Time step {t}, Bus {bus}: "

@@ -632,7 +632,7 @@ def box_line_loading_two_subplots(mc_line_results_df1, mc_line_results_df2):
         showfliers=True,
         ax=axes[0]
     )
-    axes[0].set_ylim(0, 100)  # Set y-axis limits
+    axes[0].set_ylim(0, 120)  # Set y-axis limits
     axes[0].set_ylabel("Loading Percentage (%)")
     axes[0].set_title("Line Loading Percentages Across Monte Carlo Samples (OPF)")
     axes[0].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)  # Hide x-axis labels for the top plot
@@ -646,7 +646,7 @@ def box_line_loading_two_subplots(mc_line_results_df1, mc_line_results_df2):
         showfliers=True,
         ax=axes[1]
     )
-    axes[1].set_ylim(0, 100)  # Set y-axis limits
+    axes[1].set_ylim(0, 120)  # Set y-axis limits
     axes[1].set_xlabel("Line Index")
     axes[1].set_ylabel("Loading Percentage (%)")
     axes[1].set_title("Line Loading Percentages Across Monte Carlo Samples (DRCC)")
