@@ -247,6 +247,7 @@ def run_single_sample_with_violation(
 
                 # Ensure adjusted_load is non-negative
                 adjusted_load = max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand))
+                adjusted_load = min(par.hp_max_power, max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand)))
 
                 # print(
                 #     f"Time step {t}, Bus {bus}: "
