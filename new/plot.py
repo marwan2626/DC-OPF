@@ -303,15 +303,15 @@ def plot_opf_results_plotly(results):
                     hovermode="x unified")
     fig.show()
 
-    # Plot Load
+    # Plot Heat Pump Dispatch (Flexible Loads)
     fig = go.Figure()
-    for bus in load[time_steps[0]].keys():
-        load_values = [load[t][bus] for t in time_steps]
-        fig.add_trace(go.Scatter(x=time_steps, y=load_values, mode='lines', name=f'Bus {bus}'))
-    fig.update_layout(title='Load by Bus and Time Step',
-                    xaxis_title='Time Steps',
-                    yaxis_title='Load (MW)',
-                    hovermode="x unified")
+    for bus in load[time_steps[0]]['flexible_loads'].keys():
+        flexible_load_values = [load[t]['flexible_loads'][bus] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=flexible_load_values, mode='lines', name=f'Bus {bus}'))
+    fig.update_layout(title='Heat Pump Dispatch (Flexible Loads) by Bus and Time Step',
+                      xaxis_title='Time Steps',
+                      yaxis_title='Heat Pump Dispatch (MW)',
+                      hovermode="x unified")
     fig.show()
 
     # Plot External Grid Import/Export
@@ -324,6 +324,17 @@ def plot_opf_results_plotly(results):
                     xaxis_title='Time Steps',
                     yaxis_title='Power (MW)',
                     hovermode="x unified")
+    fig.show()
+
+    # Plot Household Load (Non-Flexible Loads)
+    fig = go.Figure()
+    for bus in load[time_steps[0]]['non_flexible_loads'].keys():
+        non_flexible_load_values = [load[t]['non_flexible_loads'][bus] for t in time_steps]
+        fig.add_trace(go.Scatter(x=time_steps, y=non_flexible_load_values, mode='lines', name=f'Bus {bus}'))
+    fig.update_layout(title='Household Load (Non-Flexible Loads) by Bus and Time Step',
+                      xaxis_title='Time Steps',
+                      yaxis_title='Household Load (MW)',
+                      hovermode="x unified")
     fig.show()
 
     # Plot Transformer Loading

@@ -1353,12 +1353,17 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
         # Fix the slack bus angle to 0 radians
         model.addConstr(theta_vars[t][slack_bus_index] == 0, name=f'slack_theta_{t}')
 
+        # Compute maximum heat demand for each flexible load bus over the day
+        max_heat_demand_per_bus = {
+            bus: max(flexible_time_synchronized_loads[t].get(bus, 0.0) for t in time_steps)
+            for bus in flexible_load_buses
+        }
 
         # Define flexible load variables with global peak limit (par.hp_max_power)
         flexible_load_vars[t] = model.addVars(
             flexible_load_buses,
             lb=0,
-            ub=par.hp_max_power,
+            ub={bus: max_heat_demand_per_bus[bus] for bus in flexible_load_buses},
             name=f'flexible_load_{t}'
         )
                             
@@ -1398,7 +1403,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
 
                     # 3. Storage Charging: use excess power for storage charging if available
                     model.addConstr(
-                        ts_in_vars[t][bus] <= par.hp_max_power,
+                        ts_in_vars[t][bus] <= flexible_load_vars[t][bus],
                         name=f'storage_charging_{t}_{bus}'
                     )
 
@@ -1417,7 +1422,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
                     else:
                         # Update SOF based on the previous timestep
                         model.addConstr(
-                            ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t - 1]][bus] + (par.ts_eff * ts_in_vars[t][bus] - ts_out_vars[t][bus]) / ts_size_mwh_scaled_dict[bus],
+                            ts_sof_vars[t][bus] == ts_sof_vars[time_steps[t - 1]][bus] + (par.ts_eff * ts_in_vars[t][bus] - (ts_out_vars[t][bus]/par.ts_eff)) / ts_size_mwh_scaled_dict[bus],
                             name=f'storage_state_update_{t}_{bus}'
                         )
 
@@ -1520,7 +1525,7 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
         import_cost * ext_grid_import_vars[t] +
         export_cost * ext_grid_export_vars[t] +
         (gp.quicksum(curtailment_cost * curtailment_vars[t][bus] for bus in pv_buses) if len(pv_buses) > 0 else 0) +
-        gp.quicksum(flexibility_cost * ts_out_vars[t][bus] for bus in flexible_load_buses)
+        gp.quicksum(flexibility_cost * (ts_out_vars[t][bus]+ts_in_vars[t][bus]) for bus in flexible_load_buses)
         for t in time_steps
     )
     model.setObjective(total_cost, GRB.MINIMIZE)
@@ -1544,14 +1549,16 @@ def solve_opf6(net, time_steps, const_load_heatpump, const_load_household, heatp
             theta_results[t] = {bus: theta_vars[t][bus].x for bus in net.bus.index}
             transformer_loading_results[t] = transformer_loading_results[t].x
             
+            # Separate flexible and non-flexible load results
             load_results[t] = {
-                bus: (
-                    #(flexible_load_vars[t][bus].x if bus in flexible_load_buses else 0.0) +
-                    #non_flexible_time_synchronized_loads[t][bus]  # Add non-flexible loads
-                    #flexible_time_synchronized_loads[t][bus] + non_flexible_time_synchronized_loads[t][bus]
-                    flexible_load_vars[t][bus].x if bus in flexible_load_buses else 0.0
-                )
-                for bus in net.bus.index
+                'flexible_loads': {
+                    bus: flexible_load_vars[t][bus].x if bus in flexible_load_buses else 0.0
+                    for bus in flexible_load_buses
+                },
+                'non_flexible_loads': {
+                    bus: non_flexible_time_synchronized_loads[t][bus]
+                    for bus in non_flexible_load_buses
+                },
             }
 
             # Extract thermal storage results for each flexible load bus

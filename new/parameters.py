@@ -26,15 +26,15 @@ import numpy as np
 ## GENERAL ## 
 ###############################################################################
 ### NETWORK ###
-hp_scaling = 1.3 # heat pump scaling factor
-hh_scaling = 3 # household scaling factor
+hp_scaling = 1.1 # heat pump scaling factor
+hh_scaling = 1.3 # household scaling factor
 
-hp_max_power = 0.06 # heat pump max power in MW
+hp_max_power = 1 # heat pump max power in MW
 ts_size_mwh = 48*4 # thermal storage size in MWh
 ts_sof_init = 0.5 # initial state of fill of thermal storage
 ts_eff = 0.95 # thermal storage efficiency
-ts_out_max = 0.06 # thermal storage max output in MWth
-ts_in_max = 0.06 # thermal storage max input in MWth
+ts_out_max = 0.045 # thermal storage max output in MWth
+ts_in_max = 0.045 # thermal storage max input in MWth
 COP = 3 # heat pump COP
 
 ### Optimization Costs ###

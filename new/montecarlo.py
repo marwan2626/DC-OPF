@@ -195,7 +195,10 @@ def run_single_sample_with_violation(
     net = net.deepcopy()
 
     # Extract OPF results
-    flexible_load_vars = opf_results['load']
+    # Extract flexible loads (heat pump dispatch) from OPF results
+    flexible_load_dispatch = {
+        t: opf_results['load'][t]['flexible_loads'] for t in time_steps
+    }
     ts_in = opf_results['thermal_storage']['ts_in']
     ts_out = opf_results['thermal_storage']['ts_out']
 
@@ -239,14 +242,14 @@ def run_single_sample_with_violation(
                 sampled_heat_demand = sample_profile.loc[t].at['P_HEATPUMP_NORM'] * scaling_factor
                 #print(f"Time step {t}, Bus {bus}: Sampled heat demand = {sampled_heat_demand}")  # Debug statement
 
-                # Compute adjusted load
-                nominal_heatpump = flexible_load_vars[t][bus]
+                # Get the flexible load dispatch from OPF results
+                nominal_heatpump = flexible_load_dispatch[t].get(bus, 0.0)
                 #ts_out_value = ts_out[t][bus]
                 #ts_in_value = ts_in[t][bus]
                 nominal_heat_demand = flexible_time_synchronized_loads[t][bus] 
 
                 # Ensure adjusted_load is non-negative
-                adjusted_load = max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand))
+                #adjusted_load = max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand))
                 adjusted_load = min(par.hp_max_power, max(0.0, nominal_heatpump + (sampled_heat_demand - nominal_heat_demand)))
 
                 # print(
